@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { filterRelevant } from "../src/context/filter";
 import { validateFindings } from "../src/analyzer/schema";
 import { createAnalyzer } from "../src/analyzer/provider";
+import { resolveProvider } from "../src/config";
 import {
   formatSummary,
   formatInlineComment,
@@ -217,6 +218,21 @@ async function realAnalysis(): Promise<void> {
   }
 }
 
+/** 2c. Auto-tests hors-ligne — sélection / inférence du fournisseur. */
+function offlineProviderTests(): void {
+  console.log("\n=== Auto-test hors-ligne (sélection du fournisseur) ===");
+
+  assert(resolveProvider("gemini", true, true).provider === "gemini", "valeur explicite gemini");
+  assert(resolveProvider("CLAUDE", false, false).provider === "claude", "valeur explicite claude (casse)");
+  // Variable vide (variable GitHub non définie) -> inférence depuis la clé présente.
+  assert(resolveProvider("", false, true).provider === "gemini", "vide + clé gemini -> gemini");
+  assert(resolveProvider("", true, false).provider === "claude", "vide + clé claude -> claude");
+  assert(resolveProvider(undefined, false, false).provider === "claude", "absent + aucune clé -> claude");
+  const typo = resolveProvider("gemni", false, true);
+  assert(typo.provider === "gemini" && !!typo.warning, "typo -> inférence + avertissement");
+  console.log("  ✓ explicite gagne, vide -> inférence par la clé, typo -> inférence + avertissement");
+}
+
 function assert(cond: boolean, message: string): void {
   if (!cond) throw new Error(`Auto-test échoué : ${message}`);
 }
@@ -225,6 +241,7 @@ async function run(): Promise<void> {
   previewFixtures();
   offlineSelfTests();
   offlineAnchorTests();
+  offlineProviderTests();
   await realAnalysis();
   console.log("\n✅ Harnais local OK.");
 }

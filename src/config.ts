@@ -6,9 +6,10 @@ export type ProviderName = "claude" | "gemini";
 /**
  * Secrets et configuration runtime.
  *
- * Politique fail-fast : sans `GITHUB_TOKEN`, on échoue immédiatement. Le choix du
- * fournisseur se fait via `LLM_PROVIDER` (défaut `claude`) ; l'absence de la clé du
- * fournisseur sélectionné ne déclenche qu'un avertissement (l'analyse sera ignorée).
+ * Politique fail-fast : sans `GITHUB_TOKEN`, on échoue immédiatement. Le fournisseur se
+ * choisit via `LLM_PROVIDER` (`claude`/`gemini`) ; si la variable est vide ou absente, on
+ * **infère** le fournisseur depuis la clé API présente. L'absence de la clé du fournisseur
+ * retenu ne déclenche qu'un avertissement (l'analyse est alors ignorée).
  */
 export interface Config {
   githubToken: string;
@@ -27,25 +28,57 @@ export function loadConfig(): Config {
     );
   }
 
-  const provider = parseProvider(process.env.LLM_PROVIDER);
   const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
   const geminiApiKey = process.env.GEMINI_API_KEY;
 
+  const { provider, warning } = resolveProvider(
+    process.env.LLM_PROVIDER,
+    !!anthropicApiKey,
+    !!geminiApiKey,
+  );
+  if (warning) core.warning(warning);
+
   const selectedKey = provider === "claude" ? anthropicApiKey : geminiApiKey;
   if (!selectedKey) {
-    const envName = provider === "claude" ? "ANTHROPIC_API_KEY" : "GEMINI_API_KEY";
-    core.warning(
-      `${envName} absente — fournisseur « ${provider} » sélectionné mais analyse indisponible.`,
-    );
+    if (!anthropicApiKey && !geminiApiKey) {
+      core.warning(
+        "Aucune clé API définie (ni ANTHROPIC_API_KEY ni GEMINI_API_KEY) — analyse indisponible.",
+      );
+    } else {
+      const envName = provider === "claude" ? "ANTHROPIC_API_KEY" : "GEMINI_API_KEY";
+      core.warning(
+        `${envName} absente — fournisseur « ${provider} » sélectionné mais analyse indisponible.`,
+      );
+    }
   }
 
   return { githubToken, provider, anthropicApiKey, geminiApiKey };
 }
 
-/** Lit `LLM_PROVIDER` (insensible à la casse), repli sur `claude` si absent/inconnu. */
-function parseProvider(raw: string | undefined): ProviderName {
-  const value = (raw ?? "claude").trim().toLowerCase();
-  if (value === "claude" || value === "gemini") return value;
-  core.warning(`LLM_PROVIDER="${raw}" inconnu — repli sur « claude ».`);
-  return "claude";
+/**
+ * Détermine le fournisseur LLM. Fonction **pure** (sans log) pour être testable.
+ *
+ * - Une valeur explicite valide (`claude`/`gemini`, insensible à la casse) l'emporte toujours.
+ * - Sinon (variable vide / absente / inconnue) : on **infère** depuis la clé disponible —
+ *   si une seule des deux est définie, on prend ce fournisseur ; à défaut, repli sur `claude`.
+ *   (Une variable GitHub non définie arrive comme chaîne vide, d'où l'inférence silencieuse.)
+ */
+export function resolveProvider(
+  raw: string | undefined,
+  hasClaudeKey: boolean,
+  hasGeminiKey: boolean,
+): { provider: ProviderName; warning?: string } {
+  const value = (raw ?? "").trim().toLowerCase();
+  if (value === "claude" || value === "gemini") {
+    return { provider: value };
+  }
+
+  let provider: ProviderName = "claude";
+  if (hasGeminiKey && !hasClaudeKey) provider = "gemini";
+
+  const warning =
+    value === ""
+      ? undefined
+      : `LLM_PROVIDER="${raw}" inconnu — détection automatique : « ${provider} ».`;
+  return { provider, warning };
 }
