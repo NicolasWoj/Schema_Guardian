@@ -22,5 +22,8 @@ jobs:
       - run: npm ci
       - run: npx tsx src/index.ts
         env:
+          # Fournisseur LLM : définir la variable de repo LLM_PROVIDER à "claude" ou "gemini".
+          LLM_PROVIDER: ${{ vars.LLM_PROVIDER }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

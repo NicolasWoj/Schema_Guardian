@@ -1,22 +1,24 @@
 import { z } from "zod";
-import type Anthropic from "@anthropic-ai/sdk";
+import type { Finding } from "../types";
 
 /**
- * Schéma de sortie structurée de l'analyzer.
+ * Cœur du contrat de sortie, **agnostique du fournisseur**.
  *
- * Deux représentations volontairement maintenues en parallèle (ceinture + bretelles) :
- *  - `REPORT_FINDINGS_TOOL` : le JSON Schema envoyé à l'API en `strict: true`.
- *    L'API garantit alors que `tool_use.input` est conforme.
- *  - `ReportSchema` (Zod) : revalidation côté Node après réception, pour récupérer
- *    un objet **typé** et rejeter proprement toute dérive plutôt que de planter.
+ * - `CATEGORIES` / `SEVERITIES` : source unique de vérité des enums, réutilisée par
+ *   chaque schéma spécifique (outil Claude, responseSchema Gemini) pour rester en phase.
+ * - `ReportSchema` (Zod) : revalidation côté Node de toute sortie LLM. C'est ce contrat
+ *   partagé qui rend un changement de fournisseur sûr — le reste du pipeline ne voit que
+ *   des `Finding[]` validés, peu importe qui les a produits.
  *
- * Sprint 1 : une seule catégorie active (`SERVICE_ROLE_LEAK`). L'enum s'étendra
- * catégorie par catégorie aux sprints suivants.
+ * Sprint 1 : une seule catégorie active. L'enum s'étendra catégorie par catégorie.
  */
 
+export const CATEGORIES = ["SERVICE_ROLE_LEAK"] as const;
+export const SEVERITIES = ["critical", "high", "medium", "info"] as const;
+
 export const FindingSchema = z.object({
-  category: z.enum(["SERVICE_ROLE_LEAK"]),
-  severity: z.enum(["critical", "high", "medium", "info"]),
+  category: z.enum(CATEGORIES),
+  severity: z.enum(SEVERITIES),
   file: z.string(),
   line: z.number().int(),
   title: z.string(),
@@ -30,63 +32,27 @@ export const ReportSchema = z.object({
 
 export type Report = z.infer<typeof ReportSchema>;
 
+/** Champs requis par chaque finding (réutilisé par les schémas Claude et Gemini). */
+export const FINDING_REQUIRED = [
+  "category",
+  "severity",
+  "file",
+  "line",
+  "title",
+  "explanation",
+  "suggested_fix",
+] as const;
+
 /**
- * Outil `report_findings` en strict tool use.
- * `additionalProperties: false` + `required` exhaustif sont exigés par le mode strict
- * et garantissent que le modèle ne peut ni inventer de champ ni en omettre.
+ * Revalide une sortie LLM brute avec Zod (bretelles). En cas de non-conformité, on
+ * rejette explicitement plutôt que de propager un objet douteux dans le pipeline.
  */
-export const REPORT_FINDINGS_TOOL: Anthropic.Tool = {
-  name: "report_findings",
-  description: "Report all confirmed security findings for this pull request.",
-  strict: true,
-  input_schema: {
-    type: "object",
-    additionalProperties: false,
-    properties: {
-      findings: {
-        type: "array",
-        items: {
-          type: "object",
-          additionalProperties: false,
-          properties: {
-            category: {
-              type: "string",
-              enum: ["SERVICE_ROLE_LEAK"],
-            },
-            severity: {
-              type: "string",
-              enum: ["critical", "high", "medium", "info"],
-            },
-            file: {
-              type: "string",
-              description: "Repo-relative path, exactly as it appears in the diff.",
-            },
-            line: {
-              type: "integer",
-              description: "1-based line in the NEW version of the file (RIGHT side of the diff).",
-            },
-            title: { type: "string", description: "One-line summary." },
-            explanation: {
-              type: "string",
-              description: "Why it is exploitable. Name the concrete attack.",
-            },
-            suggested_fix: {
-              type: "string",
-              description: "Concrete remediation; may include a code or SQL snippet.",
-            },
-          },
-          required: [
-            "category",
-            "severity",
-            "file",
-            "line",
-            "title",
-            "explanation",
-            "suggested_fix",
-          ],
-        },
-      },
-    },
-    required: ["findings"],
-  },
-};
+export function validateFindings(input: unknown): Finding[] {
+  const parsed = ReportSchema.safeParse(input);
+  if (!parsed.success) {
+    throw new Error(
+      `Réponse non conforme au schéma report_findings : ${parsed.error.message}`,
+    );
+  }
+  return parsed.data.findings;
+}

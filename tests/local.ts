@@ -2,9 +2,11 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { filterRelevant } from "../src/context/filter";
-import { validateFindings, analyze } from "../src/analyzer/claude";
+import { validateFindings } from "../src/analyzer/schema";
+import { createAnalyzer } from "../src/analyzer/provider";
 import { formatSummary } from "../src/report/formatter";
 import type { ChangedFile } from "../src/types";
+import type { Config, ProviderName } from "../src/config";
 
 /**
  * Harnais de test local (Sprint 1).
@@ -144,20 +146,34 @@ function offlineSelfTests(): void {
   console.log("  ✓ réponse non conforme -> rejetée");
 }
 
-/** 3. Analyse réelle si la clé est présente. */
+/** 3. Analyse réelle si la clé du fournisseur sélectionné est présente. */
 async function realAnalysis(): Promise<void> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
+  const provider: ProviderName =
+    (process.env.LLM_PROVIDER ?? "claude").trim().toLowerCase() === "gemini"
+      ? "gemini"
+      : "claude";
+
+  const config: Config = {
+    githubToken: "local",
+    provider,
+    anthropicApiKey: process.env.ANTHROPIC_API_KEY,
+    geminiApiKey: process.env.GEMINI_API_KEY,
+  };
+
+  const analyzer = createAnalyzer(config);
+  if (!analyzer) {
     console.log(
-      "\n(ℹ️ ANTHROPIC_API_KEY absente — analyse réelle ignorée. Auto-tests hors-ligne suffisants.)",
+      `\n(ℹ️ Clé absente pour le fournisseur « ${provider} » — analyse réelle ignorée. Auto-tests hors-ligne suffisants.)`,
     );
     return;
   }
 
-  console.log("\n=== Analyse réelle via l'API Claude ===");
+  console.log(
+    `\n=== Analyse réelle via ${analyzer.provider} (${analyzer.model}) ===`,
+  );
   for (const name of FIXTURES) {
     const relevant = filterRelevant(readFixture(name));
-    const findings = await analyze(apiKey, relevant);
+    const findings = await analyzer.analyze(relevant);
     console.log(`▶ ${name} -> ${findings.length} finding(s)`);
     for (const f of findings) console.log(`    • [${f.severity}] ${f.title}`);
   }

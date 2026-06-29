@@ -4,7 +4,7 @@ import { createClient } from "./github/client";
 import { getPrRef, listChangedFiles } from "./github/pr";
 import { postSummaryComment } from "./github/review";
 import { filterRelevant } from "./context/filter";
-import { analyze } from "./analyzer/claude";
+import { createAnalyzer } from "./analyzer/provider";
 import { formatSummary } from "./report/formatter";
 
 /**
@@ -31,15 +31,18 @@ async function main(): Promise<void> {
     return;
   }
 
-  if (!config.anthropicApiKey) {
+  const analyzer = createAnalyzer(config);
+  if (!analyzer) {
     core.warning(
-      "ANTHROPIC_API_KEY absente — fichiers pertinents détectés mais analyse impossible.",
+      `Aucune clé API pour le fournisseur « ${config.provider} » — analyse impossible.`,
     );
     return;
   }
 
-  core.info(`Analyse de ${relevant.length} fichier(s) pertinent(s)…`);
-  const findings = await analyze(config.anthropicApiKey, relevant);
+  core.info(
+    `Analyse de ${relevant.length} fichier(s) avec ${analyzer.provider} (${analyzer.model})…`,
+  );
+  const findings = await analyzer.analyze(relevant);
   core.info(`${findings.length} finding(s) confirmé(s).`);
 
   await postSummaryComment(octokit, ref, formatSummary(findings));
