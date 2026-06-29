@@ -3,7 +3,7 @@ new file mode 100644
 index 0000000..a1b2c3d
 --- /dev/null
 +++ b/app/dashboard/UserList.tsx
-@@ -0,0 +1,15 @@
+@@ -0,0 +1,16 @@
 +"use client";
 +
 +import { createClient } from "@supabase/supabase-js";
@@ -15,10 +15,11 @@ index 0000000..a1b2c3d
 +);
 +
 +export async function UserList() {
-+  // Appele directement depuis le navigateur.
++  // Appele directement depuis le navigateur (aucune RLS ne protege).
 +  const { data } = await supabaseAdmin.from("users").select("*");
 +  return data ?? [];
 +}
++// Composant expose cote client.
 diff --git a/README.md b/README.md
 index e69de29..0a1b2c3 100644
 --- a/README.md

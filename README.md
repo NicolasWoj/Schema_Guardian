@@ -9,13 +9,14 @@ Agent de sécurité pour la frontière **Next.js ↔ Supabase**, packagé en **G
 
 ## État du projet
 
-**Sprint 1 — MVP : détection `SERVICE_ROLE_LEAK`** ✅
-Le pipeline complet tourne de bout en bout : `diff → filtre → analyse Claude → commentaire`.
-L'agent détecte l'exposition de la clé d'admin Supabase (`service_role`) à du code atteignable
-par le navigateur, et poste un commentaire de synthèse. Une seule catégorie est active ;
-l'ancrage ligne par ligne et les autres détections arrivent aux sprints suivants.
+**Sprint 2 — Revue ancrée ligne par ligne** ✅
+Le pipeline détecte l'exposition de la clé d'admin Supabase (`service_role`) et poste une
+**revue ancrée** : chaque finding apparaît directement sur la ligne concernée de la PR
+(`pulls.createReview`, `side: "RIGHT"`). Garde-fou anti-422 en deux couches — les findings
+hors-diff basculent en synthèse et tout refus d'ancrage déclenche un repli automatique.
+Une seule catégorie est active ; les autres détections arrivent aux sprints suivants.
 
-Feuilles de route : [docs/sprints/sprint-0.md](docs/sprints/sprint-0.md) · [docs/sprints/sprint-1.md](docs/sprints/sprint-1.md).
+Feuilles de route : [sprint-0](docs/sprints/sprint-0.md) · [sprint-1](docs/sprints/sprint-1.md) · [sprint-2](docs/sprints/sprint-2.md).
 
 ## Architecture
 
@@ -97,7 +98,7 @@ Attendu : **1 finding `critical`** sur `vulnerable.diff`, **0** sur `clean.diff`
 |---|---|---|
 | 0 | Échafaudage, plomberie, filtre, harnais local | ✅ |
 | 1 | MVP : détection `SERVICE_ROLE_LEAK` + commentaire de synthèse | ✅ |
-| 2 | Ancrage des commentaires ligne par ligne | ⏳ |
-| 3 | Détection RLS / route orpheline (contexte repo) | — |
+| 2 | Ancrage des commentaires ligne par ligne | ✅ |
+| 3 | Détection RLS / route orpheline (contexte repo) | ⏳ |
 | 4 | Over-fetching de colonnes sensibles | — |
 | 5 | Durcissement, calibrage, idempotence, blocage opt-in | — |

@@ -7,6 +7,8 @@ export interface PrRef {
   owner: string;
   repo: string;
   pull_number: number;
+  /** SHA de tête de la PR — sert de `commit_id` pour ancrer la revue (Sprint 2). */
+  headSha?: string;
 }
 
 /**
@@ -18,10 +20,13 @@ export function getPrRef(): PrRef | null {
   const pr = context.payload.pull_request;
   if (!pr) return null;
 
+  const headSha = typeof pr.head?.sha === "string" ? pr.head.sha : undefined;
+
   return {
     owner: context.repo.owner,
     repo: context.repo.repo,
     pull_number: pr.number,
+    headSha,
   };
 }
 
