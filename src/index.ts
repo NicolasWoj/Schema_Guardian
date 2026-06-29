@@ -2,15 +2,15 @@ import * as core from "@actions/core";
 import { loadConfig } from "./config";
 import { createClient } from "./github/client";
 import { getPrRef, listChangedFiles } from "./github/pr";
-import { postSummaryComment, BOT_MARKER } from "./github/review";
+import { postSummaryComment } from "./github/review";
 import { filterRelevant } from "./context/filter";
-import type { ChangedFile } from "./types";
+import { analyze } from "./analyzer/claude";
+import { formatSummary } from "./report/formatter";
 
 /**
- * Point d'entrée (Sprint 0).
+ * Point d'entrée (Sprint 1) — MVP `SERVICE_ROLE_LEAK`.
  *
- * Valide la plomberie de bout en bout : payload PR -> Octokit -> liste des fichiers
- * -> filtre de pertinence -> commentaire posté. Aucune analyse LLM encore.
+ * Pipeline : payload PR -> diff -> filtre (garde-coût) -> analyse Claude -> commentaire.
  */
 async function main(): Promise<void> {
   const ref = getPrRef();
@@ -25,42 +25,25 @@ async function main(): Promise<void> {
   const changed = await listChangedFiles(octokit, ref);
   const relevant = filterRelevant(changed);
 
-  core.info(
-    `Fichiers modifiés : ${changed.length} ; pertinents pour l'audit : ${relevant.length}.`,
-  );
-
-  await postSummaryComment(octokit, ref, buildLifeSignComment(changed, relevant));
-  core.info("Commentaire « Schema Guardian actif » posté ✅");
-}
-
-/** Commentaire de vie : prouve que la chaîne fonctionne et liste les fichiers retenus. */
-function buildLifeSignComment(
-  changed: ChangedFile[],
-  relevant: ChangedFile[],
-): string {
-  const lines: string[] = [
-    BOT_MARKER,
-    "### 🛡️ Schema Guardian actif ✅",
-    "",
-    `Plomberie opérationnelle — ${changed.length} fichier(s) modifié(s), ` +
-      `${relevant.length} retenu(s) pour l'audit.`,
-    "",
-  ];
-
-  if (relevant.length > 0) {
-    lines.push("**Fichiers pertinents :**");
-    for (const f of relevant) lines.push(`- \`${f.filename}\``);
-  } else {
-    lines.push("_Aucun fichier pertinent pour l'audit dans cette PR._");
+  // Garde-coût : aucun appel LLM si rien de pertinent n'est touché (succès silencieux).
+  if (relevant.length === 0) {
+    core.info("Aucun fichier pertinent — analyse ignorée (garde-coût).");
+    return;
   }
 
-  lines.push(
-    "",
-    "> ℹ️ Sprint 0 — aucune analyse de sécurité n'est encore active " +
-      "(détection `SERVICE_ROLE_LEAK` prévue au Sprint 1).",
-  );
+  if (!config.anthropicApiKey) {
+    core.warning(
+      "ANTHROPIC_API_KEY absente — fichiers pertinents détectés mais analyse impossible.",
+    );
+    return;
+  }
 
-  return lines.join("\n");
+  core.info(`Analyse de ${relevant.length} fichier(s) pertinent(s)…`);
+  const findings = await analyze(config.anthropicApiKey, relevant);
+  core.info(`${findings.length} finding(s) confirmé(s).`);
+
+  await postSummaryComment(octokit, ref, formatSummary(findings));
+  core.info("Commentaire de synthèse posté ✅");
 }
 
 main().catch((err) => {

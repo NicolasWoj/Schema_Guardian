@@ -1,0 +1,28 @@
+diff --git a/app/dashboard/UserList.tsx b/app/dashboard/UserList.tsx
+new file mode 100644
+index 0000000..a1b2c3d
+--- /dev/null
++++ b/app/dashboard/UserList.tsx
+@@ -0,0 +1,15 @@
++"use client";
++
++import { createClient } from "@supabase/supabase-js";
++
++// Fuite: la cle service_role est exposee dans un Client Component.
++const supabaseAdmin = createClient(
++  process.env.NEXT_PUBLIC_SUPABASE_URL!,
++  process.env.SUPABASE_SERVICE_ROLE_KEY!,
++);
++
++export async function UserList() {
++  // Appele directement depuis le navigateur.
++  const { data } = await supabaseAdmin.from("users").select("*");
++  return data ?? [];
++}
+diff --git a/README.md b/README.md
+index e69de29..0a1b2c3 100644
+--- a/README.md
++++ b/README.md
+@@ -1 +1,2 @@
+ # Schema Guardian
++Projet de demonstration — ce fichier n'est pas pertinent pour l'audit.

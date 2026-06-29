@@ -1,0 +1,19 @@
+diff --git a/app/components/PublicPosts.tsx b/app/components/PublicPosts.tsx
+new file mode 100644
+index 0000000..b2c3d4e
+--- /dev/null
++++ b/app/components/PublicPosts.tsx
+@@ -0,0 +1,12 @@
++"use client";
++
++import { createClient } from "@supabase/supabase-js";
++
++// Cle anon publique, gouvernee par la RLS — usage sur cote client.
++const supabase = createClient(
++  process.env.NEXT_PUBLIC_SUPABASE_URL!,
++  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
++);
++
++export async function getPublicPosts() {
++  return supabase.from("posts").select("id, title");
++}
