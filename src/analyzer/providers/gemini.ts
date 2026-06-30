@@ -53,10 +53,10 @@ export function createGeminiAnalyzer(
   return {
     provider: "gemini",
     model,
-    async analyze(files): Promise<Finding[]> {
+    async analyze(files, securityContext): Promise<Finding[]> {
       const response = await ai.models.generateContent({
         model,
-        contents: buildUserMessage(files),
+        contents: buildUserMessage(files, securityContext),
         config: {
           systemInstruction: SYSTEM_PROMPT,
           responseMimeType: "application/json",

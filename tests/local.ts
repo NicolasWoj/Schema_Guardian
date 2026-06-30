@@ -15,6 +15,11 @@ import {
   commentableLinesByFile,
   partitionByAnchorability,
 } from "../src/github/diff";
+import { scanRlsMap, parseRls, statusFor } from "../src/context/rls";
+import {
+  extractTableAccesses,
+  serializeSecurityContext,
+} from "../src/context/collector";
 import type { ChangedFile, Finding } from "../src/types";
 import type { Config, ProviderName } from "../src/config";
 
@@ -26,7 +31,7 @@ import type { Config, ProviderName } from "../src/config";
  *  3. Analyse RÉELLE via le fournisseur sélectionné si sa clé est présente.
  */
 
-const FIXTURES = ["vulnerable.diff", "clean.diff"];
+const FIXTURES = ["vulnerable.diff", "clean.diff", "orphan.diff", "protected.diff"];
 
 /** Parseur de diff unifié minimal : reconstruit fidèlement le `patch` de chaque fichier. */
 function parseDiff(diff: string): ChangedFile[] {
@@ -208,17 +213,57 @@ async function realAnalysis(): Promise<void> {
   }
 
   console.log(`\n=== Analyse réelle via ${analyzer.provider} (${analyzer.model}) ===`);
+  const rlsMap = scanRlsMap(join(here, "fixtures", "sample-repo"));
   for (const name of FIXTURES) {
     const relevant = filterRelevant(readFixture(name));
-    const findings = await analyzer.analyze(relevant);
+    const accesses = extractTableAccesses(relevant);
+    const context =
+      accesses.length > 0 ? serializeSecurityContext(rlsMap, accesses) : undefined;
+    const findings = await analyzer.analyze(relevant, context);
     console.log(`▶ ${name} -> ${findings.length} finding(s)`);
     for (const f of findings) {
-      console.log(`    • [${f.severity}] ${f.file}:${f.line} — ${f.title}`);
+      console.log(`    • [${f.severity}] ${f.category} ${f.file}:${f.line} — ${f.title}`);
     }
   }
 }
 
-/** 2c. Auto-tests hors-ligne — sélection / inférence du fournisseur. */
+/** 2c. Auto-tests hors-ligne — contexte RLS / routes orphelines (Sprint 3). */
+function offlineRlsTests(): void {
+  console.log("\n=== Auto-test hors-ligne (contexte RLS / routes orphelines) ===");
+
+  const map = scanRlsMap(join(here, "fixtures", "sample-repo"));
+  assert(map.size === 4, "4 tables scannées");
+  assert(statusFor(map, "users") === "protected", "users protégée");
+  assert(statusFor(map, "notes") === "protected", "notes protégée");
+  assert(statusFor(map, "documents") === "protected", "documents protégée");
+  // Le `alter table secrets enable rls` est en commentaire -> doit rester no_rls.
+  assert(statusFor(map, "secrets") === "no_rls", "secrets orpheline (commentaire ignoré)");
+  console.log("  ✓ scan : 4 tables (users/notes/documents protégées, secrets orpheline)");
+
+  const orphanAcc = extractTableAccesses(filterRelevant(readFixture("orphan.diff")));
+  const protAcc = extractTableAccesses(filterRelevant(readFixture("protected.diff")));
+  assert(orphanAcc.some((a) => a.table === "secrets"), "orphan -> secrets");
+  assert(protAcc.some((a) => a.table === "documents"), "protected -> documents");
+  console.log("  ✓ extraction du diff : orphan -> secrets, protected -> documents");
+
+  const ctxOrphan = serializeSecurityContext(map, orphanAcc);
+  const ctxProt = serializeSecurityContext(map, protAcc);
+  assert(/secrets[^\n]*NOT PROTECTED/i.test(ctxOrphan), "secrets NOT PROTECTED dans le contexte");
+  assert(/`documents`[^\n]*-> PROTECTED/i.test(ctxProt), "documents PROTECTED dans le contexte");
+  console.log("  ✓ contexte sérialisé : secrets signalée NOT protected, documents protégée");
+
+  // Garde-fou : un nom de policy contenant « on » ne doit pas détourner la table.
+  const tricky = parseRls(
+    `create table public.events ( id uuid primary key );
+     alter table public.events enable row level security;
+     create policy "read events on weekends" on public.events for select using (true);`,
+  );
+  assert(statusFor(tricky, "events") === "protected", "policy nommée avec « on » -> bonne table");
+  assert(statusFor(tricky, "weekends") === "unknown", "pas de table parasite « weekends »");
+  console.log("  ✓ nom de policy contenant « on » -> attribution correcte (pas de table parasite)");
+}
+
+/** 2d. Auto-tests hors-ligne — sélection / inférence du fournisseur. */
 function offlineProviderTests(): void {
   console.log("\n=== Auto-test hors-ligne (sélection du fournisseur) ===");
 
@@ -241,6 +286,7 @@ async function run(): Promise<void> {
   previewFixtures();
   offlineSelfTests();
   offlineAnchorTests();
+  offlineRlsTests();
   offlineProviderTests();
   await realAnalysis();
   console.log("\n✅ Harnais local OK.");

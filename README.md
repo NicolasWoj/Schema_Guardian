@@ -9,14 +9,15 @@ Agent de sécurité pour la frontière **Next.js ↔ Supabase**, packagé en **G
 
 ## État du projet
 
-**Sprint 2 — Revue ancrée ligne par ligne** ✅
-Le pipeline détecte l'exposition de la clé d'admin Supabase (`service_role`) et poste une
-**revue ancrée** : chaque finding apparaît directement sur la ligne concernée de la PR
-(`pulls.createReview`, `side: "RIGHT"`). Garde-fou anti-422 en deux couches — les findings
-hors-diff basculent en synthèse et tout refus d'ancrage déclenche un repli automatique.
-Une seule catégorie est active ; les autres détections arrivent aux sprints suivants.
+**Sprint 3 — Détection des routes orphelines (contexte RLS)** ✅
+L'agent raisonne désormais sur **tout le dépôt** : il scanne les migrations SQL pour cartographier
+les tables protégées par RLS, puis croise cette carte avec les accès `supabase.from()` introduits
+par la PR. Une table lue côté client **sans RLS effective** = **route orpheline** (`ORPHAN_TABLE_ACCESS`,
+`high`), ancrée sur la ligne de l'accès. Gestion stricte de l'incertitude : une table absente du scan
+est `UNKNOWN` → jamais `high` (au plus un `info` formulé en question). Deux catégories actives :
+`SERVICE_ROLE_LEAK` (`critical`) et `ORPHAN_TABLE_ACCESS` (`high`).
 
-Feuilles de route : [sprint-0](docs/sprints/sprint-0.md) · [sprint-1](docs/sprints/sprint-1.md) · [sprint-2](docs/sprints/sprint-2.md).
+Feuilles de route : [sprint-0](docs/sprints/sprint-0.md) · [sprint-1](docs/sprints/sprint-1.md) · [sprint-2](docs/sprints/sprint-2.md) · [sprint-3](docs/sprints/sprint-3.md).
 
 ## Architecture
 
@@ -31,7 +32,7 @@ GitHub Action ──► COLLECTOR ──► ANALYZER (Claude) ──► REPORTER
 | Dossier | Rôle |
 |---|---|
 | `src/github/` | Client Octokit, lecture de la PR, publication des commentaires. |
-| `src/context/` | Filtre de pertinence (et, plus tard, carte RLS du repo). |
+| `src/context/` | Filtre de pertinence + scan RLS du dépôt (`rls.ts`) + collecte des accès `from()` (`collector.ts`). |
 | `src/analyzer/` | Interface multi-fournisseur (`Analyzer`) + implémentations `providers/{claude,gemini}.ts` + contrat Zod partagé. |
 | `src/report/`   | Mise en forme Markdown des findings. |
 | `tests/`        | Harnais local + fixtures (jeu d'éval). |
@@ -99,6 +100,6 @@ Attendu : **1 finding `critical`** sur `vulnerable.diff`, **0** sur `clean.diff`
 | 0 | Échafaudage, plomberie, filtre, harnais local | ✅ |
 | 1 | MVP : détection `SERVICE_ROLE_LEAK` + commentaire de synthèse | ✅ |
 | 2 | Ancrage des commentaires ligne par ligne | ✅ |
-| 3 | Détection RLS / route orpheline (contexte repo) | ⏳ |
-| 4 | Over-fetching de colonnes sensibles | — |
+| 3 | Détection RLS / route orpheline (contexte repo) | ✅ |
+| 4 | Over-fetching de colonnes sensibles | ⏳ |
 | 5 | Durcissement, calibrage, idempotence, blocage opt-in | — |

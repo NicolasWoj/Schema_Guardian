@@ -10,7 +10,8 @@ import { createGeminiAnalyzer } from "./providers/gemini";
 export interface Analyzer {
   readonly provider: string;
   readonly model: string;
-  analyze(files: ChangedFile[]): Promise<Finding[]>;
+  /** `securityContext` : carte RLS sérialisée (Sprint 3), injectée après le diff. */
+  analyze(files: ChangedFile[], securityContext?: string): Promise<Finding[]>;
 }
 
 /**

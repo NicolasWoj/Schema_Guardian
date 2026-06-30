@@ -68,14 +68,16 @@ export function createClaudeAnalyzer(
   return {
     provider: "claude",
     model,
-    async analyze(files): Promise<Finding[]> {
+    async analyze(files, securityContext): Promise<Finding[]> {
       const response = await client.messages.create({
         model,
         max_tokens: MAX_TOKENS,
         system: SYSTEM_PROMPT,
         tools: [REPORT_FINDINGS_TOOL],
         tool_choice: { type: "tool", name: "report_findings" },
-        messages: [{ role: "user", content: buildUserMessage(files) }],
+        messages: [
+          { role: "user", content: buildUserMessage(files, securityContext) },
+        ],
       });
       return extractFindings(response);
     },

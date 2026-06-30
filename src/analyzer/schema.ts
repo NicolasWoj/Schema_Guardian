@@ -10,10 +10,10 @@ import type { Finding } from "../types";
  *   partagé qui rend un changement de fournisseur sûr — le reste du pipeline ne voit que
  *   des `Finding[]` validés, peu importe qui les a produits.
  *
- * Sprint 1 : une seule catégorie active. L'enum s'étendra catégorie par catégorie.
+ * L'enum s'étend catégorie par catégorie. Sprint 3 : ajout de `ORPHAN_TABLE_ACCESS`.
  */
 
-export const CATEGORIES = ["SERVICE_ROLE_LEAK"] as const;
+export const CATEGORIES = ["SERVICE_ROLE_LEAK", "ORPHAN_TABLE_ACCESS"] as const;
 export const SEVERITIES = ["critical", "high", "medium", "info"] as const;
 
 export const FindingSchema = z.object({

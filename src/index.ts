@@ -7,6 +7,8 @@ import { filterRelevant } from "./context/filter";
 import { createAnalyzer } from "./analyzer/provider";
 import { postReview } from "./github/review";
 import { commentableLinesByFile, partitionByAnchorability } from "./github/diff";
+import { scanRlsMap } from "./context/rls";
+import { extractTableAccesses, serializeSecurityContext } from "./context/collector";
 import {
   formatSummary,
   formatInlineComment,
@@ -14,10 +16,10 @@ import {
 } from "./report/formatter";
 
 /**
- * Point d'entrée (Sprint 2) — détection `SERVICE_ROLE_LEAK` + revue ancrée ligne par ligne.
+ * Point d'entrée (Sprint 3) — `SERVICE_ROLE_LEAK` + `ORPHAN_TABLE_ACCESS`, revue ancrée.
  *
- * Pipeline : payload PR -> diff -> filtre (garde-coût) -> analyse -> revue ancrée
- * (repli automatique en commentaire de synthèse si l'ancrage n'est pas possible).
+ * Pipeline : payload PR -> diff -> filtre (garde-coût) -> contexte RLS du dépôt ->
+ * analyse -> revue ancrée (repli en synthèse si l'ancrage n'est pas possible).
  */
 async function main(): Promise<void> {
   const ref = getPrRef();
@@ -46,10 +48,22 @@ async function main(): Promise<void> {
     return;
   }
 
+  // Contexte de sécurité (Sprint 3) : on ne scanne le dépôt que si la PR introduit des
+  // accès `supabase.from()` — sinon ce contexte n'apporte rien (et on évite un scan inutile).
+  const accesses = extractTableAccesses(relevant);
+  let securityContext: string | undefined;
+  if (accesses.length > 0) {
+    const rlsMap = scanRlsMap(process.cwd());
+    securityContext = serializeSecurityContext(rlsMap, accesses);
+    core.info(
+      `Contexte RLS : ${rlsMap.size} table(s) scannée(s), ${accesses.length} accès from() dans la PR.`,
+    );
+  }
+
   core.info(
     `Analyse de ${relevant.length} fichier(s) avec ${analyzer.provider} (${analyzer.model})…`,
   );
-  const findings = await analyzer.analyze(relevant);
+  const findings = await analyzer.analyze(relevant, securityContext);
   core.info(`${findings.length} finding(s) confirmé(s).`);
 
   // Aucun finding : commentaire de synthèse rassurant.

@@ -1,0 +1,19 @@
+diff --git a/app/admin/SecretList.tsx b/app/admin/SecretList.tsx
+new file mode 100644
+index 0000000..1a2b3c4
+--- /dev/null
++++ b/app/admin/SecretList.tsx
+@@ -0,0 +1,13 @@
++"use client";
++
++import { createClient } from "@supabase/supabase-js";
++
++const supabase = createClient(
++  process.env.NEXT_PUBLIC_SUPABASE_URL!,
++  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
++);
++
++export async function SecretList() {
++  const { data } = await supabase.from("secrets").select("*");
++  return data ?? [];
++}
