@@ -18,6 +18,8 @@ import {
 import { scanRlsMap, parseRls, statusFor } from "../src/context/rls";
 import {
   extractTableAccesses,
+  extractSensitiveSelects,
+  isSensitiveColumn,
   serializeSecurityContext,
 } from "../src/context/collector";
 import type { ChangedFile, Finding } from "../src/types";
@@ -31,7 +33,13 @@ import type { Config, ProviderName } from "../src/config";
  *  3. Analyse RÉELLE via le fournisseur sélectionné si sa clé est présente.
  */
 
-const FIXTURES = ["vulnerable.diff", "clean.diff", "orphan.diff", "protected.diff"];
+const FIXTURES = [
+  "vulnerable.diff",
+  "clean.diff",
+  "orphan.diff",
+  "protected.diff",
+  "overfetch.diff",
+];
 
 /** Parseur de diff unifié minimal : reconstruit fidèlement le `patch` de chaque fichier. */
 function parseDiff(diff: string): ChangedFile[] {
@@ -217,8 +225,11 @@ async function realAnalysis(): Promise<void> {
   for (const name of FIXTURES) {
     const relevant = filterRelevant(readFixture(name));
     const accesses = extractTableAccesses(relevant);
+    const sensitive = extractSensitiveSelects(relevant);
     const context =
-      accesses.length > 0 ? serializeSecurityContext(rlsMap, accesses) : undefined;
+      accesses.length > 0 || sensitive.length > 0
+        ? serializeSecurityContext(rlsMap, accesses, sensitive)
+        : undefined;
     const findings = await analyzer.analyze(relevant, context);
     console.log(`▶ ${name} -> ${findings.length} finding(s)`);
     for (const f of findings) {
@@ -263,7 +274,107 @@ function offlineRlsTests(): void {
   console.log("  ✓ nom de policy contenant « on » -> attribution correcte (pas de table parasite)");
 }
 
-/** 2d. Auto-tests hors-ligne — sélection / inférence du fournisseur. */
+/** 2d. Auto-tests hors-ligne — over-fetch de colonnes sensibles (Sprint 4). */
+function offlineOverfetchTests(): void {
+  console.log("\n=== Auto-test hors-ligne (over-fetch de colonnes sensibles) ===");
+
+  const over = extractSensitiveSelects(filterRelevant(readFixture("overfetch.diff")));
+  assert(
+    over.some((s) => s.columns.includes("password_hash") && s.table === "users"),
+    "password_hash repéré sur users",
+  );
+  console.log("  ✓ détection : password_hash repéré (table users)");
+
+  // Anti-bruit : colonnes anodines et `select('*')` ne doivent rien remonter.
+  assert(
+    extractSensitiveSelects(filterRelevant(readFixture("clean.diff"))).length === 0,
+    "select('id, title') ne remonte rien",
+  );
+  const star = extractSensitiveSelects([
+    {
+      filename: "x.tsx",
+      status: "added",
+      additions: 1,
+      deletions: 0,
+      changes: 1,
+      patch: '@@ -0,0 +1,1 @@\n+  await supabase.from("posts").select("*");',
+    },
+  ]);
+  assert(star.length === 0, "select('*') ne remonte rien");
+  console.log("  ✓ anti-bruit : select('id, title') -> rien");
+
+  // Faux positifs (matching par segments) : noms anodins contenant un motif sensible.
+  for (const anodin of [
+    "tokens_used",
+    "token_count",
+    "secretary",
+    "cvv_verified",
+    "cvc_validated",
+    "pwd_attempts",
+    "ssn_verified",
+    "email",
+    "created_at",
+    "id",
+  ]) {
+    assert(!isSensitiveColumn(anodin), `faux positif évité : ${anodin}`);
+  }
+  // Vrais positifs : doivent rester détectés.
+  for (const sensible of [
+    "password_hash",
+    "password",
+    "access_token",
+    "refresh_token",
+    "api_key",
+    "private_key",
+    "credit_card",
+    "ssn",
+    "cvv",
+    "secret",
+    "secret_key",
+    "mfa_secret",
+  ]) {
+    assert(isSensitiveColumn(sensible), `colonne sensible détectée : ${sensible}`);
+  }
+  console.log("  ✓ segments : token_count/cvv_verified/secretary non signalés, password_hash/access_token oui");
+
+  // Chaînage from()/select() sur des lignes séparées -> table associée.
+  const chained = extractSensitiveSelects([
+    {
+      filename: "y.tsx",
+      status: "added",
+      additions: 2,
+      deletions: 0,
+      changes: 2,
+      patch: '@@ -0,0 +1,2 @@\n+  const q = supabase.from("accounts")\n+    .select("id, api_key");',
+    },
+  ]);
+  assert(
+    chained.some((s) => s.table === "accounts" && s.columns.includes("api_key")),
+    "from()/select() chaînés -> table associée",
+  );
+  console.log("  ✓ chaînage from()/.select() multi-lignes -> table associée");
+
+  const findings = validateFindings({
+    findings: [
+      {
+        category: "SENSITIVE_OVERFETCH",
+        severity: "medium",
+        file: "app/profile/UserCard.tsx",
+        line: 11,
+        title: "Over-fetch de password_hash",
+        explanation: "La colonne password_hash est tirée vers le client.",
+        suggested_fix: "select('id, email')",
+      },
+    ],
+  });
+  assert(
+    findings.length === 1 && findings[0].category === "SENSITIVE_OVERFETCH",
+    "catégorie SENSITIVE_OVERFETCH acceptée par le schéma",
+  );
+  console.log("  ✓ schéma : catégorie SENSITIVE_OVERFETCH acceptée");
+}
+
+/** 2e. Auto-tests hors-ligne — sélection / inférence du fournisseur. */
 function offlineProviderTests(): void {
   console.log("\n=== Auto-test hors-ligne (sélection du fournisseur) ===");
 
@@ -287,6 +398,7 @@ async function run(): Promise<void> {
   offlineSelfTests();
   offlineAnchorTests();
   offlineRlsTests();
+  offlineOverfetchTests();
   offlineProviderTests();
   await realAnalysis();
   console.log("\n✅ Harnais local OK.");

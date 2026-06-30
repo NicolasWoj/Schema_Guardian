@@ -1,20 +1,19 @@
 import { z } from "zod";
-import type { Finding } from "../types";
+import { CATEGORIES, SEVERITIES, type Finding } from "../types";
 
 /**
  * Cœur du contrat de sortie, **agnostique du fournisseur**.
  *
- * - `CATEGORIES` / `SEVERITIES` : source unique de vérité des enums, réutilisée par
- *   chaque schéma spécifique (outil Claude, responseSchema Gemini) pour rester en phase.
+ * - `CATEGORIES` / `SEVERITIES` : source unique de vérité (définie dans `types.ts`), réexportée
+ *   ici et réutilisée par chaque schéma spécifique (outil Claude, responseSchema Gemini) pour
+ *   rester en phase — et dont les unions de types `FindingCategory`/`Severity` sont dérivées.
  * - `ReportSchema` (Zod) : revalidation côté Node de toute sortie LLM. C'est ce contrat
  *   partagé qui rend un changement de fournisseur sûr — le reste du pipeline ne voit que
  *   des `Finding[]` validés, peu importe qui les a produits.
- *
- * L'enum s'étend catégorie par catégorie. Sprint 3 : ajout de `ORPHAN_TABLE_ACCESS`.
  */
 
-export const CATEGORIES = ["SERVICE_ROLE_LEAK", "ORPHAN_TABLE_ACCESS"] as const;
-export const SEVERITIES = ["critical", "high", "medium", "info"] as const;
+// Réexport pour les fournisseurs (providers/{claude,gemini}.ts les importent depuis ici).
+export { CATEGORIES, SEVERITIES };
 
 export const FindingSchema = z.object({
   category: z.enum(CATEGORIES),

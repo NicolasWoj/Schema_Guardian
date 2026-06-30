@@ -8,7 +8,11 @@ import { createAnalyzer } from "./analyzer/provider";
 import { postReview } from "./github/review";
 import { commentableLinesByFile, partitionByAnchorability } from "./github/diff";
 import { scanRlsMap } from "./context/rls";
-import { extractTableAccesses, serializeSecurityContext } from "./context/collector";
+import {
+  extractTableAccesses,
+  extractSensitiveSelects,
+  serializeSecurityContext,
+} from "./context/collector";
 import {
   formatSummary,
   formatInlineComment,
@@ -48,15 +52,17 @@ async function main(): Promise<void> {
     return;
   }
 
-  // Contexte de sécurité (Sprint 3) : on ne scanne le dépôt que si la PR introduit des
-  // accès `supabase.from()` — sinon ce contexte n'apporte rien (et on évite un scan inutile).
+  // Contexte de sécurité : on ne scanne le dépôt que si la PR introduit des accès
+  // `supabase.from()` ou des `select()` de colonnes sensibles — sinon, scan inutile.
   const accesses = extractTableAccesses(relevant);
+  const sensitiveSelects = extractSensitiveSelects(relevant);
   let securityContext: string | undefined;
-  if (accesses.length > 0) {
+  if (accesses.length > 0 || sensitiveSelects.length > 0) {
     const rlsMap = scanRlsMap(process.cwd());
-    securityContext = serializeSecurityContext(rlsMap, accesses);
+    securityContext = serializeSecurityContext(rlsMap, accesses, sensitiveSelects);
     core.info(
-      `Contexte RLS : ${rlsMap.size} table(s) scannée(s), ${accesses.length} accès from() dans la PR.`,
+      `Contexte : ${rlsMap.size} table(s) scannée(s), ${accesses.length} accès from(), ` +
+        `${sensitiveSelects.length} select() sensible(s).`,
     );
   }
 

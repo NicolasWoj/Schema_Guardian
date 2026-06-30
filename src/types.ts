@@ -1,17 +1,21 @@
 /**
  * Types partagés du projet.
  *
- * `Finding` / `Severity` / `FindingCategory` ne sont pas encore produits au Sprint 0
- * (aucune analyse LLM). Ils sont définis ici dès maintenant pour figer le contrat de
- * sortie de l'analyzer et éviter une refonte de types au Sprint 1.
+ * `CATEGORIES` / `SEVERITIES` sont la **source unique de vérité** : les unions de types en
+ * sont dérivées, et `analyzer/schema.ts` les réexporte pour bâtir le schéma Zod et les schémas
+ * spécifiques aux fournisseurs. Ajouter une catégorie ici la propage partout (types + runtime).
  */
 
-export type Severity = "critical" | "high" | "medium" | "info";
+export const CATEGORIES = [
+  "SERVICE_ROLE_LEAK",
+  "ORPHAN_TABLE_ACCESS",
+  "SENSITIVE_OVERFETCH",
+] as const;
 
-export type FindingCategory =
-  | "ORPHAN_TABLE_ACCESS"
-  | "SERVICE_ROLE_LEAK"
-  | "SENSITIVE_OVERFETCH";
+export const SEVERITIES = ["critical", "high", "medium", "info"] as const;
+
+export type FindingCategory = (typeof CATEGORIES)[number];
+export type Severity = (typeof SEVERITIES)[number];
 
 /** Une faille confirmée, telle que l'analyzer la rapportera (Sprint 1+). */
 export interface Finding {

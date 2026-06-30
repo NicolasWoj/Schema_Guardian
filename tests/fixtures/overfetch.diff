@@ -1,8 +1,8 @@
-diff --git a/app/admin/SecretList.tsx b/app/admin/SecretList.tsx
+diff --git a/app/profile/UserCard.tsx b/app/profile/UserCard.tsx
 new file mode 100644
-index 0000000..1a2b3c4
+index 0000000..3c4d5e6
 --- /dev/null
-+++ b/app/admin/SecretList.tsx
++++ b/app/profile/UserCard.tsx
 @@ -0,0 +1,13 @@
 +"use client";
 +
@@ -13,7 +13,7 @@ index 0000000..1a2b3c4
 +  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
 +);
 +
-+export async function SecretList() {
-+  const { data } = await supabase.from("secrets").select("id, value");
++export async function UserCard() {
++  const { data } = await supabase.from("users").select("id, email, password_hash");
 +  return data ?? [];
 +}

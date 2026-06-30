@@ -9,15 +9,15 @@ Agent de sécurité pour la frontière **Next.js ↔ Supabase**, packagé en **G
 
 ## État du projet
 
-**Sprint 3 — Détection des routes orphelines (contexte RLS)** ✅
-L'agent raisonne désormais sur **tout le dépôt** : il scanne les migrations SQL pour cartographier
-les tables protégées par RLS, puis croise cette carte avec les accès `supabase.from()` introduits
-par la PR. Une table lue côté client **sans RLS effective** = **route orpheline** (`ORPHAN_TABLE_ACCESS`,
-`high`), ancrée sur la ligne de l'accès. Gestion stricte de l'incertitude : une table absente du scan
-est `UNKNOWN` → jamais `high` (au plus un `info` formulé en question). Deux catégories actives :
-`SERVICE_ROLE_LEAK` (`critical`) et `ORPHAN_TABLE_ACCESS` (`high`).
+**Sprint 4 — Over-fetching de colonnes sensibles** ✅
+Les **trois catégories** de détection sont complètes. L'agent signale aussi les `select()` qui tirent
+des colonnes manifestement sensibles (`password_hash`, `*_token`, `secret`, PII forte) vers le client
+(`SENSITIVE_OVERFETCH`, `medium`) — indépendamment de la RLS, car la donnée fuit dans la réponse réseau.
+Anti-bruit strict : `select('*')` et colonnes anodines (`id`, `email`, `title`…) ne sont jamais signalés.
 
-Feuilles de route : [sprint-0](docs/sprints/sprint-0.md) · [sprint-1](docs/sprints/sprint-1.md) · [sprint-2](docs/sprints/sprint-2.md) · [sprint-3](docs/sprints/sprint-3.md).
+**Catégories actives :** `SERVICE_ROLE_LEAK` (`critical`) · `ORPHAN_TABLE_ACCESS` (`high`) · `SENSITIVE_OVERFETCH` (`medium`).
+
+Feuilles de route : [sprint-0](docs/sprints/sprint-0.md) · [sprint-1](docs/sprints/sprint-1.md) · [sprint-2](docs/sprints/sprint-2.md) · [sprint-3](docs/sprints/sprint-3.md) · [sprint-4](docs/sprints/sprint-4.md).
 
 ## Architecture
 
@@ -101,5 +101,5 @@ Attendu : **1 finding `critical`** sur `vulnerable.diff`, **0** sur `clean.diff`
 | 1 | MVP : détection `SERVICE_ROLE_LEAK` + commentaire de synthèse | ✅ |
 | 2 | Ancrage des commentaires ligne par ligne | ✅ |
 | 3 | Détection RLS / route orpheline (contexte repo) | ✅ |
-| 4 | Over-fetching de colonnes sensibles | ⏳ |
-| 5 | Durcissement, calibrage, idempotence, blocage opt-in | — |
+| 4 | Over-fetching de colonnes sensibles | ✅ |
+| 5 | Durcissement, calibrage, idempotence, blocage opt-in | ⏳ |
