@@ -7,6 +7,16 @@ import type { PrRef } from "./pr";
  */
 export const BOT_MARKER = "<!-- schema-guardian -->";
 
+/**
+ * Reconnaît un commentaire écrit par le bot. Le marqueur doit être **en tête** du corps
+ * (le bot le pose toujours en première ligne) : un « Quote reply » d'un humain recopie le
+ * marqueur mais préfixé de `> `, donc `startsWith` ne le confond pas — on ne risque plus
+ * d'éditer ou de supprimer le commentaire d'un humain.
+ */
+function isBotComment(body: string | null | undefined): boolean {
+  return (body ?? "").startsWith(BOT_MARKER);
+}
+
 /** Un commentaire ancré sur une ligne précise (côté RIGHT) d'un fichier. */
 export interface InlineComment {
   path: string;
@@ -17,12 +27,16 @@ export interface InlineComment {
 /**
  * Commentaire de synthèse **idempotent** : met à jour en place le commentaire du bot s'il
  * existe déjà (repéré par le marqueur), sinon le crée. Une seule synthèse vivante par PR.
+ * `createIfMissing: false` sert à *rétracter* (mettre à jour uniquement si une synthèse existe,
+ * sans en créer une nouvelle sur une PR qui n'a jamais rien eu à signaler).
  */
 export async function upsertSummaryComment(
   octokit: Octokit,
   ref: PrRef,
   body: string,
+  opts: { createIfMissing?: boolean } = {},
 ): Promise<void> {
+  const { createIfMissing = true } = opts;
   const comments = await octokit.paginate(octokit.rest.issues.listComments, {
     owner: ref.owner,
     repo: ref.repo,
@@ -30,7 +44,7 @@ export async function upsertSummaryComment(
     per_page: 100,
   });
 
-  const mine = comments.find((c) => (c.body ?? "").includes(BOT_MARKER));
+  const mine = comments.find((c) => isBotComment(c.body));
   if (mine) {
     await octokit.rest.issues.updateComment({
       owner: ref.owner,
@@ -38,7 +52,7 @@ export async function upsertSummaryComment(
       comment_id: mine.id,
       body,
     });
-  } else {
+  } else if (createIfMissing) {
     await octokit.rest.issues.createComment({
       owner: ref.owner,
       repo: ref.repo,
@@ -65,7 +79,7 @@ export async function deleteBotReviewComments(
 
   let removed = 0;
   for (const c of comments) {
-    if ((c.body ?? "").includes(BOT_MARKER)) {
+    if (isBotComment(c.body)) {
       await octokit.rest.pulls.deleteReviewComment({
         owner: ref.owner,
         repo: ref.repo,

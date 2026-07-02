@@ -8,6 +8,7 @@ import {
   extractSensitiveSelects,
   serializeSecurityContext,
 } from "../src/context/collector";
+import { resolveProvider, type Config } from "../src/config";
 import type { ChangedFile } from "../src/types";
 
 /** Utilitaires de chargement de fixtures, partagés par le harnais local et le jeu d'éval. */
@@ -16,11 +17,28 @@ const here = dirname(fileURLToPath(import.meta.url));
 export const FIXTURES_DIR = join(here, "fixtures");
 export const SAMPLE_REPO = join(FIXTURES_DIR, "sample-repo");
 
+/**
+ * Config d'exécution locale (hors GitHub Action), partagée par le harnais et l'éval.
+ * Utilise `resolveProvider` — la MÊME inférence par clé que la prod — pour ne pas diverger :
+ * une seule clé (Gemini par ex.) suffit à sélectionner le bon fournisseur sans LLM_PROVIDER.
+ */
+export function localConfig(): Config {
+  const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
+  const geminiApiKey = process.env.GEMINI_API_KEY;
+  const { provider } = resolveProvider(
+    process.env.LLM_PROVIDER,
+    !!anthropicApiKey,
+    !!geminiApiKey,
+  );
+  return { githubToken: "local", provider, anthropicApiKey, geminiApiKey };
+}
+
 /** Parseur de diff unifié minimal : reconstruit fidèlement le `patch` de chaque fichier. */
 export function parseDiff(diff: string): ChangedFile[] {
   const files: ChangedFile[] = [];
   let current: ChangedFile | null = null;
   let patchLines: string[] = [];
+  let inHunk = false;
 
   const flush = (): void => {
     if (!current) return;
@@ -33,6 +51,7 @@ export function parseDiff(diff: string): ChangedFile[] {
     if (line.startsWith("diff --git")) {
       flush();
       patchLines = [];
+      inHunk = false;
       const match = line.match(/ b\/(.+)$/);
       current = {
         filename: match ? match[1] : "unknown",
@@ -46,19 +65,24 @@ export function parseDiff(diff: string): ChangedFile[] {
     }
     if (!current) continue;
 
+    // En-têtes de fichier (`---`/`+++`/`index`/…) : uniquement AVANT le premier hunk. Une fois
+    // dans un hunk, une ligne de contenu peut légitimement commencer par `--`/`++` (ex. commentaire
+    // SQL `-- …` supprimé, décrément `--i`) — la jeter décalerait la numérotation RIGHT.
     if (
-      line.startsWith("+++") ||
-      line.startsWith("---") ||
-      line.startsWith("index ") ||
-      line.startsWith("new file") ||
-      line.startsWith("deleted file") ||
-      line.startsWith("rename ") ||
-      line.startsWith("similarity ")
+      !inHunk &&
+      (line.startsWith("+++") ||
+        line.startsWith("---") ||
+        line.startsWith("index ") ||
+        line.startsWith("new file") ||
+        line.startsWith("deleted file") ||
+        line.startsWith("rename ") ||
+        line.startsWith("similarity "))
     ) {
       continue;
     }
 
     if (line.startsWith("@@")) {
+      inHunk = true;
       patchLines.push(line);
     } else if (line.startsWith("+")) {
       current.additions++;

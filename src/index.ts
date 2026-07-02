@@ -48,6 +48,18 @@ async function main(): Promise<void> {
   // Garde-coût : aucun appel LLM si rien de pertinent n'est touché.
   if (relevant.length === 0) {
     core.info("Aucun fichier pertinent — analyse ignorée (garde-coût).");
+    // Idempotence : une PR devenue propre (fichier vulnérable retiré / ignoré) ne doit pas
+    // conserver la synthèse et les commentaires ancrés d'un push précédent. On rétracte —
+    // sans créer de nouvelle synthèse là où il n'y a jamais rien eu à signaler. Purement
+    // ménager : un échec ici ne doit pas faire tomber le check (fail open).
+    try {
+      await deleteBotReviewComments(octokit, ref);
+      await upsertSummaryComment(octokit, ref, formatSummary([]), { createIfMissing: false });
+    } catch (err) {
+      core.warning(
+        `Nettoyage idempotent impossible (${err instanceof Error ? err.message : String(err)}).`,
+      );
+    }
     return;
   }
 
@@ -83,8 +95,16 @@ async function main(): Promise<void> {
   );
 
   // Idempotence : on retire d'abord les commentaires de revue du bot du push précédent.
-  const removed = await deleteBotReviewComments(octokit, ref);
-  if (removed > 0) core.info(`${removed} commentaire(s) de revue précédent(s) supprimé(s).`);
+  // Fail open : un échec de suppression (404/403/rate-limit) ne doit PAS abandonner le run
+  // avant la synthèse — la synthèse reste la source de vérité et doit toujours être postée.
+  try {
+    const removed = await deleteBotReviewComments(octokit, ref);
+    if (removed > 0) core.info(`${removed} commentaire(s) de revue précédent(s) supprimé(s).`);
+  } catch (err) {
+    core.warning(
+      `Suppression des commentaires de revue précédents impossible (${err instanceof Error ? err.message : String(err)}) — poursuite vers la synthèse.`,
+    );
+  }
 
   // Revue ancrée : commentaires individuels sur les lignes présentes dans le diff.
   // La synthèse (ci-dessous) reste la source de vérité — un ancrage refusé n'y perd rien.

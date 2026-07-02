@@ -70,7 +70,9 @@ export function formatSummary(findings: Finding[], opts: SummaryOptions = {}): s
     footer.push(`_Coût : ${opts.usage.inputTokens} tokens in / ${opts.usage.outputTokens} out._`);
   }
   if (footer.length > 0) {
-    lines.push("---", ...footer);
+    // Ligne vide obligatoire avant `---` : collé à un paragraphe, GitHub le rend en titre
+    // setext H2 au lieu d'une règle horizontale (visible surtout sur la PR sans finding).
+    lines.push("", "---", ...footer);
   }
 
   return lines.join("\n").trimEnd();

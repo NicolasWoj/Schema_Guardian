@@ -18,9 +18,17 @@ export function capToBudget(files: ChangedFile[], maxChars: number): DiffBudgetR
 
   for (const file of files) {
     const size = file.patch?.length ?? 0;
-    if (kept.length === 0 || used + size <= maxChars) {
+
+    if (used + size <= maxChars) {
       kept.push(file);
       used += size;
+    } else if (kept.length === 0) {
+      // Premier fichier déjà plus gros que le plafond : on ne peut pas « ne rien analyser »,
+      // mais on ne doit pas non plus faire exploser le contexte. On envoie une version bornée
+      // du patch (jamais > maxChars) ET on le signale comme tronqué — pas de dépassement muet.
+      kept.push({ ...file, patch: (file.patch ?? "").slice(0, maxChars) });
+      truncated.push(file);
+      used = maxChars;
     } else {
       truncated.push(file);
     }

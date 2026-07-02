@@ -1,7 +1,6 @@
 import { createAnalyzer } from "../src/analyzer/provider";
-import { loadCase } from "./_fixture";
+import { loadCase, localConfig } from "./_fixture";
 import type { FindingCategory, Severity } from "../src/types";
-import type { Config, ProviderName } from "../src/config";
 
 /**
  * Jeu d'évaluation : mesure précision (0 faux positif visé) et rappel sur l'ensemble des fixtures.
@@ -39,15 +38,7 @@ const CASES: EvalCase[] = [
 async function run(): Promise<void> {
   console.log(`Jeu d'éval : ${CASES.length} fixtures.\n`);
 
-  const provider: ProviderName =
-    (process.env.LLM_PROVIDER ?? "claude").trim().toLowerCase() === "gemini" ? "gemini" : "claude";
-  const config: Config = {
-    githubToken: "local",
-    provider,
-    anthropicApiKey: process.env.ANTHROPIC_API_KEY,
-    geminiApiKey: process.env.GEMINI_API_KEY,
-  };
-  const analyzer = createAnalyzer(config);
+  const analyzer = createAnalyzer(localConfig());
 
   // Mode hors-ligne : vérifie le chargement des fixtures + affiche les attendus.
   if (!analyzer) {

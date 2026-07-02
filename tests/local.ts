@@ -16,12 +16,11 @@ import {
   isSensitiveColumn,
   serializeSecurityContext,
 } from "../src/context/collector";
-import { loadGuardianConfig, isExcluded, shouldBlock } from "../src/guardian-config";
+import { loadGuardianConfig, isExcluded, matchesAny, shouldBlock } from "../src/guardian-config";
 import { capToBudget } from "../src/context/budget";
 import { BOT_MARKER } from "../src/github/review";
-import { readFixture, loadCase, FIXTURES_DIR, SAMPLE_REPO } from "./_fixture";
+import { readFixture, loadCase, parseDiff, localConfig, FIXTURES_DIR, SAMPLE_REPO } from "./_fixture";
 import type { ChangedFile, Finding, FindingCategory, Severity } from "../src/types";
-import type { Config, ProviderName } from "../src/config";
 
 /**
  * Harnais de test local (Sprint 5).
@@ -201,6 +200,13 @@ function offlineHardeningTests(): void {
   assert(loadGuardianConfig(SAMPLE_REPO).failOn === "none", "défaut failOn=none (pas de .guardianrc)");
   console.log("  ✓ config : ignore/allowlist + défaut failOn=none");
 
+  // globstar : `**` + slash matche zéro OU plusieurs segments (fichier racine inclus).
+  assert(matchesAny("app.test.ts", ["**/*.test.ts"]), "globstar matche un fichier racine");
+  assert(matchesAny("src/api/db.test.ts", ["**/*.test.ts"]), "globstar matche un fichier imbriqué");
+  assert(matchesAny("__mocks__/supabase.ts", ["**/__mocks__/**"]), "globstar matche un dossier racine");
+  assert(!matchesAny("src/index.ts", ["**/*.test.ts"]), "globstar n'over-matche pas");
+  console.log("  ✓ globs : **/ couvre la racine et l'imbriqué");
+
   const medium = [makeFinding("a", 1, "m", "medium")];
   const high = [makeFinding("a", 1, "h", "high")];
   assert(!shouldBlock(medium, "high"), "medium < high -> pas de blocage");
@@ -220,26 +226,52 @@ function offlineHardeningTests(): void {
   assert(kept.length === 1 && truncated.length === 2, "plafond appliqué");
   console.log(`  ✓ plafond de diff : ${kept.length} gardé(s), ${truncated.length} tronqué(s)`);
 
+  // Premier fichier plus gros que le plafond : borné à maxChars ET signalé (jamais muet).
+  const huge: ChangedFile = {
+    filename: "big.ts", status: "added", additions: 1, deletions: 0, changes: 1,
+    patch: "y".repeat(5000),
+  };
+  const capped = capToBudget([huge], 800);
+  assert(capped.kept.length === 1 && (capped.kept[0].patch?.length ?? 0) <= 800, "premier fichier borné au plafond");
+  assert(capped.truncated.length === 1, "premier fichier surdimensionné signalé");
+  console.log("  ✓ plafond : fichier unique surdimensionné borné + signalé");
+
   assert(formatSummary([]).includes(BOT_MARKER), "synthèse marquée");
   assert(formatInlineComment(makeFinding("a", 1, "t")).includes(BOT_MARKER), "commentaire marqué");
-  console.log("  ✓ idempotence : marqueur du bot détecté");
+  // Pas de titre setext : `---` doit être précédé d'une ligne vide dans la synthèse « vide » + footer.
+  assert(
+    formatSummary([], { usage: { inputTokens: 1, outputTokens: 2 } }).includes("\n\n---"),
+    "séparateur (pas de titre setext) dans la synthèse vide",
+  );
+  console.log("  ✓ idempotence : marqueur du bot + séparateur correct");
+
+  // parseDiff : dans un hunk, une ligne SUPPRIMÉE dont le contenu commence par `--`
+  // (commentaire SQL) apparaît comme `--- …`, et une ligne AJOUTÉE en `++…` comme `+++…` :
+  // ces lignes de contenu ne doivent PAS être confondues avec des en-têtes de fichier.
+  const sqlDiff = [
+    "diff --git a/db.sql b/db.sql",
+    "--- a/db.sql",
+    "+++ b/db.sql",
+    "@@ -1,2 +1,2 @@",
+    "--- ancienne politique RLS",
+    "+++nouvelle_valeur",
+    " contexte",
+  ].join("\n");
+  const [parsed] = parseDiff(sqlDiff);
+  const parsedPatch = parsed.patch ?? "";
+  assert(parsedPatch.includes("--- ancienne politique RLS"), "parseDiff garde la ligne SQL supprimée (---)");
+  assert(parsedPatch.includes("+++nouvelle_valeur"), "parseDiff garde la ligne ajoutée (+++)");
+  assert(parsed.additions === 1 && parsed.deletions === 1, "parseDiff compte + et - correctement");
+  console.log("  ✓ parseDiff : lignes de contenu ---/+++ dans un hunk préservées");
 }
 
 /** 3. Analyse réelle si la clé du fournisseur sélectionné est présente. */
 async function realAnalysis(): Promise<void> {
-  const provider: ProviderName =
-    (process.env.LLM_PROVIDER ?? "claude").trim().toLowerCase() === "gemini" ? "gemini" : "claude";
-  const config: Config = {
-    githubToken: "local",
-    provider,
-    anthropicApiKey: process.env.ANTHROPIC_API_KEY,
-    geminiApiKey: process.env.GEMINI_API_KEY,
-  };
-
+  const config = localConfig();
   const analyzer = createAnalyzer(config);
   if (!analyzer) {
     console.log(
-      `\n(ℹ️ Clé absente pour le fournisseur « ${provider} » — analyse réelle ignorée. Auto-tests hors-ligne suffisants.)`,
+      `\n(ℹ️ Clé absente pour le fournisseur « ${config.provider} » — analyse réelle ignorée. Auto-tests hors-ligne suffisants.)`,
     );
     return;
   }
