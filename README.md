@@ -116,6 +116,10 @@ Optionnel, à la racine du dépôt audité (voir [`.guardianrc.example.json`](.g
 
 > **`failOn: "none"` par défaut = fail open** : l'agent commente, il ne bloque pas — sauf activation explicite.
 > Le commentaire de synthèse est **idempotent** (mis à jour en place) ; les commentaires ancrés obsolètes sont supprimés puis recréés à chaque push.
+>
+> 🔒 **La config est lue depuis la branche _base_ de la PR** (état déjà revu), jamais depuis le
+> diff de la PR : une PR ne peut donc pas désactiver le blocage ou s'auto-exclure en modifiant
+> `.guardianrc.json` dans son propre commit. Modifier la config exige donc un merge sur la base.
 
 ## Configuration en CI
 

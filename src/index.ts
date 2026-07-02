@@ -1,8 +1,8 @@
 import * as core from "@actions/core";
 import { loadConfig } from "./config";
-import { loadGuardianConfig, isExcluded, shouldBlock } from "./guardian-config";
+import { parseGuardianConfig, isExcluded, shouldBlock } from "./guardian-config";
 import { createClient } from "./github/client";
-import { getPrRef, listChangedFiles } from "./github/pr";
+import { getPrRef, listChangedFiles, getBaseFileContent } from "./github/pr";
 import {
   upsertSummaryComment,
   deleteBotReviewComments,
@@ -35,8 +35,11 @@ async function main(): Promise<void> {
   }
 
   const config = loadConfig();
-  const guardian = loadGuardianConfig(process.cwd());
   const octokit = createClient(config.githubToken);
+
+  // Config lue depuis la branche BASE (état de confiance, déjà revu), jamais depuis le checkout
+  // de tête : une PR ne peut donc pas neutraliser le check (failOn/ignore) via son propre diff.
+  const guardian = parseGuardianConfig(await getBaseFileContent(octokit, ref, ".guardianrc.json"));
 
   const changed = await listChangedFiles(octokit, ref);
   const candidates = filterRelevant(changed);

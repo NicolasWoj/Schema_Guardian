@@ -35,13 +35,19 @@ const SEVERITY_RANK: Record<Severity, number> = {
   critical: 4,
 };
 
-/** Charge et valide `.guardianrc.json` (fusion avec les défauts). Absent → défauts (silencieux) ; malformé → défauts + avertissement. */
-export function loadGuardianConfig(root: string): GuardianConfig {
-  let content: string;
-  try {
-    content = readFileSync(join(root, ".guardianrc.json"), "utf8");
-  } catch {
-    // Fichier absent (cas normal) : défauts, sans bruit.
+/**
+ * Analyse le contenu de `.guardianrc.json` (fusion avec les défauts). Fonction **pure**,
+ * testable et indépendante de la provenance du contenu :
+ * - `null` (fichier absent) → défauts, silencieusement (cas normal) ;
+ * - JSON invalide → défauts **+ avertissement** (ne PAS confondre avec « absent » : sinon
+ *   `failOn` serait désactivé en silence) ;
+ * - objet valide → fusion avec les défauts.
+ *
+ * ⚠️ En production, le contenu doit provenir de la branche **base** (de confiance), jamais du
+ * checkout de tête : une PR ne doit pas pouvoir neutraliser le check en modifiant sa propre config.
+ */
+export function parseGuardianConfig(content: string | null): GuardianConfig {
+  if (content === null) {
     return { ...DEFAULT_CONFIG };
   }
 
@@ -49,8 +55,6 @@ export function loadGuardianConfig(root: string): GuardianConfig {
   try {
     raw = JSON.parse(content);
   } catch {
-    // Fichier présent mais JSON invalide : ne PAS le confondre avec « absent » — la config
-    // (dont failOn) serait silencieusement désactivée. On avertit avant de replier sur les défauts.
     core.warning(".guardianrc.json illisible (JSON invalide) — configuration par défaut appliquée.");
     return { ...DEFAULT_CONFIG };
   }
@@ -69,6 +73,20 @@ export function loadGuardianConfig(root: string): GuardianConfig {
         ? obj.maxDiffChars
         : DEFAULT_CONFIG.maxDiffChars,
   };
+}
+
+/**
+ * Charge `.guardianrc.json` depuis le **disque** (`root`). Réservé au harnais local / aux tests :
+ * en production, la config est lue depuis la branche base via l'API (voir `getBaseFileContent`).
+ */
+export function loadGuardianConfig(root: string): GuardianConfig {
+  let content: string | null;
+  try {
+    content = readFileSync(join(root, ".guardianrc.json"), "utf8");
+  } catch {
+    content = null;
+  }
+  return parseGuardianConfig(content);
 }
 
 function asStringArray(value: unknown, fallback: string[]): string[] {
