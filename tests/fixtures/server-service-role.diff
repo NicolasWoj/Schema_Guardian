@@ -1,0 +1,18 @@
+diff --git a/app/api/admin/route.ts b/app/api/admin/route.ts
+new file mode 100644
+index 0000000..bb22cc3
+--- /dev/null
++++ b/app/api/admin/route.ts
+@@ -0,0 +1,12 @@
++import { createClient } from "@supabase/supabase-js";
++
++// Route serveur (App Router) : la clé service_role reste côté serveur,
++// jamais expédiée au navigateur. Usage attendu et sûr — ne doit PAS être signalé.
++export async function GET() {
++  const admin = createClient(
++    process.env.SUPABASE_URL!,
++    process.env.SUPABASE_SERVICE_ROLE_KEY!,
++  );
++  const { data } = await admin.from("users").select("id");
++  return Response.json(data ?? []);
++}

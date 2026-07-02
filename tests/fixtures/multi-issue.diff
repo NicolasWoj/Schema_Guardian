@@ -1,0 +1,19 @@
+diff --git a/app/dashboard/AdminUsers.tsx b/app/dashboard/AdminUsers.tsx
+new file mode 100644
+index 0000000..aa11bb2
+--- /dev/null
++++ b/app/dashboard/AdminUsers.tsx
+@@ -0,0 +1,13 @@
++"use client";
++
++import { createClient } from "@supabase/supabase-js";
++
++const admin = createClient(
++  process.env.NEXT_PUBLIC_SUPABASE_URL!,
++  process.env.SUPABASE_SERVICE_ROLE_KEY!,
++);
++
++export async function AdminUsers() {
++  const { data } = await admin.from("users").select("id, password_hash");
++  return data ?? [];
++}

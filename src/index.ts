@@ -1,11 +1,16 @@
 import * as core from "@actions/core";
 import { loadConfig } from "./config";
+import { loadGuardianConfig, isExcluded, shouldBlock } from "./guardian-config";
 import { createClient } from "./github/client";
 import { getPrRef, listChangedFiles } from "./github/pr";
-import { postSummaryComment } from "./github/review";
+import {
+  upsertSummaryComment,
+  deleteBotReviewComments,
+  postInlineComment,
+} from "./github/review";
 import { filterRelevant } from "./context/filter";
+import { capToBudget } from "./context/budget";
 import { createAnalyzer } from "./analyzer/provider";
-import { postReview } from "./github/review";
 import { commentableLinesByFile, partitionByAnchorability } from "./github/diff";
 import { scanRlsMap } from "./context/rls";
 import {
@@ -13,17 +18,14 @@ import {
   extractSensitiveSelects,
   serializeSecurityContext,
 } from "./context/collector";
-import {
-  formatSummary,
-  formatInlineComment,
-  formatReviewSummary,
-} from "./report/formatter";
+import { formatSummary, formatInlineComment } from "./report/formatter";
 
 /**
- * Point d'entrée (Sprint 3) — `SERVICE_ROLE_LEAK` + `ORPHAN_TABLE_ACCESS`, revue ancrée.
+ * Point d'entrée (Sprint 5 / v1.0).
  *
- * Pipeline : payload PR -> diff -> filtre (garde-coût) -> contexte RLS du dépôt ->
- * analyse -> revue ancrée (repli en synthèse si l'ancrage n'est pas possible).
+ * Pipeline : PR -> diff -> filtre + exclusions `.guardianrc` -> plafond de diff ->
+ * contexte (RLS + colonnes sensibles) -> analyse -> revue ancrée idempotente +
+ * synthèse upsertée (source de vérité) -> blocage opt-in (`failOn`).
  */
 async function main(): Promise<void> {
   const ref = getPrRef();
@@ -33,12 +35,17 @@ async function main(): Promise<void> {
   }
 
   const config = loadConfig();
+  const guardian = loadGuardianConfig(process.cwd());
   const octokit = createClient(config.githubToken);
 
   const changed = await listChangedFiles(octokit, ref);
-  const relevant = filterRelevant(changed);
+  const candidates = filterRelevant(changed);
+  const relevant = candidates.filter((f) => !isExcluded(f.filename, guardian));
+  if (relevant.length < candidates.length) {
+    core.info(`${candidates.length - relevant.length} fichier(s) exclu(s) par .guardianrc.`);
+  }
 
-  // Garde-coût : aucun appel LLM si rien de pertinent n'est touché (succès silencieux).
+  // Garde-coût : aucun appel LLM si rien de pertinent n'est touché.
   if (relevant.length === 0) {
     core.info("Aucun fichier pertinent — analyse ignorée (garde-coût).");
     return;
@@ -46,68 +53,76 @@ async function main(): Promise<void> {
 
   const analyzer = createAnalyzer(config);
   if (!analyzer) {
-    core.warning(
-      `Aucune clé API pour le fournisseur « ${config.provider} » — analyse impossible.`,
-    );
+    core.warning(`Aucune clé API pour le fournisseur « ${config.provider} » — analyse impossible.`);
     return;
   }
 
-  // Contexte de sécurité : on ne scanne le dépôt que si la PR introduit des accès
-  // `supabase.from()` ou des `select()` de colonnes sensibles — sinon, scan inutile.
-  const accesses = extractTableAccesses(relevant);
-  const sensitiveSelects = extractSensitiveSelects(relevant);
+  // Plafond de diff : au-delà, on tronque et on le signalera dans la synthèse.
+  const { kept, truncated } = capToBudget(relevant, guardian.maxDiffChars);
+  if (truncated.length > 0) {
+    core.warning(
+      `Diff volumineux : ${truncated.length} fichier(s) tronqué(s) (> ${guardian.maxDiffChars} chars).`,
+    );
+  }
+
+  // Contexte de sécurité (RLS + colonnes sensibles), seulement si utile.
+  const accesses = extractTableAccesses(kept);
+  const sensitiveSelects = extractSensitiveSelects(kept);
   let securityContext: string | undefined;
   if (accesses.length > 0 || sensitiveSelects.length > 0) {
     const rlsMap = scanRlsMap(process.cwd());
     securityContext = serializeSecurityContext(rlsMap, accesses, sensitiveSelects);
-    core.info(
-      `Contexte : ${rlsMap.size} table(s) scannée(s), ${accesses.length} accès from(), ` +
-        `${sensitiveSelects.length} select() sensible(s).`,
-    );
   }
 
   core.info(
-    `Analyse de ${relevant.length} fichier(s) avec ${analyzer.provider} (${analyzer.model})…`,
+    `Analyse de ${kept.length} fichier(s) avec ${analyzer.provider} (${analyzer.model})…`,
   );
-  const findings = await analyzer.analyze(relevant, securityContext);
-  core.info(`${findings.length} finding(s) confirmé(s).`);
+  const { findings, usage } = await analyzer.analyze(kept, securityContext);
+  core.info(
+    `${findings.length} finding(s). Coût : ${usage.inputTokens} tokens in / ${usage.outputTokens} out.`,
+  );
 
-  // Aucun finding : commentaire de synthèse rassurant.
-  if (findings.length === 0) {
-    await postSummaryComment(octokit, ref, formatSummary([]));
-    core.info("Aucun finding — commentaire rassurant posté.");
-    return;
+  // Idempotence : on retire d'abord les commentaires de revue du bot du push précédent.
+  const removed = await deleteBotReviewComments(octokit, ref);
+  if (removed > 0) core.info(`${removed} commentaire(s) de revue précédent(s) supprimé(s).`);
+
+  // Revue ancrée : commentaires individuels sur les lignes présentes dans le diff.
+  // La synthèse (ci-dessous) reste la source de vérité — un ancrage refusé n'y perd rien.
+  const byFile = commentableLinesByFile(kept);
+  const { anchored } = partitionByAnchorability(findings, byFile);
+  let posted = 0;
+  if (ref.headSha) {
+    for (const f of anchored) {
+      try {
+        await postInlineComment(octokit, ref, ref.headSha, {
+          path: f.file,
+          line: f.line,
+          body: formatInlineComment(f),
+        });
+        posted++;
+      } catch (err) {
+        core.warning(
+          `Ancrage refusé pour ${f.file}:${f.line} (${err instanceof Error ? err.message : String(err)}) — présent dans la synthèse.`,
+        );
+      }
+    }
   }
 
-  // Partition selon l'ancrabilité (ligne présente dans le diff côté RIGHT).
-  const byFile = commentableLinesByFile(relevant);
-  const { anchored, unanchored } = partitionByAnchorability(findings, byFile);
+  // Synthèse upsertée = source de vérité : tous les findings + troncature + coût + blocage.
+  const blocked = shouldBlock(findings, guardian.failOn);
+  const summary = formatSummary(findings, {
+    truncated: truncated.map((f) => f.filename),
+    usage,
+    failOn: guardian.failOn,
+    blocked,
+  });
+  await upsertSummaryComment(octokit, ref, summary);
+  core.info(`Synthèse mise à jour ✅ (${posted} commentaire(s) ancré(s)).`);
 
-  // Aucun ancrage possible : repli sur la synthèse globale.
-  if (anchored.length === 0) {
-    await postSummaryComment(octokit, ref, formatSummary(findings));
-    core.info("Aucun finding ancrable — commentaire de synthèse posté.");
-    return;
-  }
-
-  const comments = anchored.map((f) => ({
-    path: f.file,
-    line: f.line,
-    body: formatInlineComment(f),
-  }));
-  const summary = formatReviewSummary(unanchored, findings.length);
-
-  // Garde-fou anti-422 : si l'ancrage est refusé, on replie tout sur la synthèse.
-  try {
-    await postReview(octokit, ref, comments, summary);
-    core.info(
-      `Revue ancrée postée : ${anchored.length} en ligne, ${unanchored.length} en synthèse ✅`,
+  if (blocked) {
+    core.setFailed(
+      `Blocage activé : un finding atteint le seuil failOn="${guardian.failOn}".`,
     );
-  } catch (err) {
-    core.warning(
-      `Ancrage refusé (${err instanceof Error ? err.message : String(err)}) — repli sur commentaire de synthèse.`,
-    );
-    await postSummaryComment(octokit, ref, formatSummary(findings));
   }
 }
 

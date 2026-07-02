@@ -7,17 +7,20 @@ Agent de sécurité pour la frontière **Next.js ↔ Supabase**, packagé en **G
 > **Principe directeur : précision > rappel.** En cas de doute, l'agent se tait.
 > Un faux positif coûte plus cher qu'un vrai positif manqué.
 
-## État du projet
+## État du projet — v1.0 ✅
 
-**Sprint 4 — Over-fetching de colonnes sensibles** ✅
-Les **trois catégories** de détection sont complètes. L'agent signale aussi les `select()` qui tirent
-des colonnes manifestement sensibles (`password_hash`, `*_token`, `secret`, PII forte) vers le client
-(`SENSITIVE_OVERFETCH`, `medium`) — indépendamment de la RLS, car la donnée fuit dans la réponse réseau.
-Anti-bruit strict : `select('*')` et colonnes anodines (`id`, `email`, `title`…) ne sont jamais signalés.
+Les **5 sprints** du plan sont terminés. Schema Guardian v1.0 :
 
-**Catégories actives :** `SERVICE_ROLE_LEAK` (`critical`) · `ORPHAN_TABLE_ACCESS` (`high`) · `SENSITIVE_OVERFETCH` (`medium`).
+- détecte **trois classes de failles** à la frontière Next.js ↔ Supabase :
+  `SERVICE_ROLE_LEAK` (`critical`) · `ORPHAN_TABLE_ACCESS` (`high`) · `SENSITIVE_OVERFETCH` (`medium`) ;
+- raisonne sur le **dépôt entier** (scan RLS des migrations), pas seulement sur le diff ;
+- commente **ligne par ligne**, de façon **idempotente** (une seule revue vivante, jamais d'empilement) ;
+- est **configurable** par dépôt (`.guardianrc.json`) et peut **bloquer** une PR au-delà d'un seuil de sévérité ;
+- est calibré sur un **jeu d'éval** (11 fixtures) mesurant précision et rappel.
 
-Feuilles de route : [sprint-0](docs/sprints/sprint-0.md) · [sprint-1](docs/sprints/sprint-1.md) · [sprint-2](docs/sprints/sprint-2.md) · [sprint-3](docs/sprints/sprint-3.md) · [sprint-4](docs/sprints/sprint-4.md).
+**Multi-fournisseur** : Claude *ou* Gemini, commutable via `LLM_PROVIDER`.
+
+Feuilles de route : [sprint-0](docs/sprints/sprint-0.md) · [1](docs/sprints/sprint-1.md) · [2](docs/sprints/sprint-2.md) · [3](docs/sprints/sprint-3.md) · [4](docs/sprints/sprint-4.md) · [5](docs/sprints/sprint-5.md).
 
 ## Architecture
 
@@ -34,8 +37,9 @@ GitHub Action ──► COLLECTOR ──► ANALYZER (Claude) ──► REPORTER
 | `src/github/` | Client Octokit, lecture de la PR, publication des commentaires. |
 | `src/context/` | Filtre de pertinence + scan RLS du dépôt (`rls.ts`) + collecte des accès `from()` (`collector.ts`). |
 | `src/analyzer/` | Interface multi-fournisseur (`Analyzer`) + implémentations `providers/{claude,gemini}.ts` + contrat Zod partagé. |
-| `src/report/`   | Mise en forme Markdown des findings. |
-| `tests/`        | Harnais local + fixtures (jeu d'éval). |
+| `src/report/`   | Mise en forme Markdown des findings (synthèse + commentaires ancrés). |
+| `src/guardian-config.ts` | Config `.guardianrc` (ignore/allowlist, `failOn`, `maxDiffChars`). |
+| `tests/`        | Harnais local + **jeu d'éval** (`eval.ts`) + fixtures. |
 
 ## Prérequis
 
@@ -84,6 +88,35 @@ LLM_PROVIDER=gemini GEMINI_API_KEY=... npm run test:local
 ```
 Attendu : **1 finding `critical`** sur `vulnerable.diff`, **0** sur `clean.diff` — quel que soit le fournisseur.
 
+**Jeu d'éval** — précision / rappel sur les 11 fixtures (le critère de calibrage) :
+```bash
+npm run eval                         # hors-ligne : vérifie le chargement + affiche les attendus
+ANTHROPIC_API_KEY=sk-ant-... npm run eval   # réel : mesure précision (0 FP visé) et rappel
+```
+
+## Configuration (`.guardianrc.json`)
+
+Optionnel, à la racine du dépôt audité (voir [`.guardianrc.example.json`](.guardianrc.example.json)) :
+
+```json
+{
+  "ignore": ["docs/**", "**/*.test.ts"],
+  "allowlist": ["src/lib/server-only/**"],
+  "failOn": "none",
+  "maxDiffChars": 60000
+}
+```
+
+| Clé | Rôle | Défaut |
+|---|---|---|
+| `ignore` | Globs de fichiers jamais analysés. | `[]` |
+| `allowlist` | Globs de fichiers de confiance (non analysés). | `[]` |
+| `failOn` | Seuil de **blocage** de la PR : `none` \| `info` \| `medium` \| `high` \| `critical`. | `none` |
+| `maxDiffChars` | Plafond de diff envoyé au LLM (au-delà : troncature signalée). | `60000` |
+
+> **`failOn: "none"` par défaut = fail open** : l'agent commente, il ne bloque pas — sauf activation explicite.
+> Le commentaire de synthèse est **idempotent** (mis à jour en place) ; les commentaires ancrés obsolètes sont supprimés puis recréés à chaque push.
+
 ## Configuration en CI
 
 1. Dans le repo GitHub : **Settings → Secrets and variables → Actions**, créer le secret du
@@ -102,4 +135,8 @@ Attendu : **1 finding `critical`** sur `vulnerable.diff`, **0** sur `clean.diff`
 | 2 | Ancrage des commentaires ligne par ligne | ✅ |
 | 3 | Détection RLS / route orpheline (contexte repo) | ✅ |
 | 4 | Over-fetching de colonnes sensibles | ✅ |
-| 5 | Durcissement, calibrage, idempotence, blocage opt-in | ⏳ |
+| 5 | Durcissement, calibrage, idempotence, blocage opt-in (v1.0) | ✅ |
+
+**Pistes v1.1+ :** export SARIF (GitHub code scanning), commentaires de suppression
+(`// guardian-ignore`), chunking pour très gros diffs, fail-soft sur erreur LLM transitoire,
+nouvelles catégories (buckets Storage publics, RPC/Edge Functions non sécurisées).

@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { SYSTEM_PROMPT, buildUserMessage } from "../prompt";
 import { CATEGORIES, SEVERITIES, FINDING_REQUIRED, validateFindings } from "../schema";
-import type { Analyzer } from "../provider";
+import type { Analyzer, AnalysisResult } from "../provider";
 import type { Finding } from "../../types";
 
 /**
@@ -68,7 +68,7 @@ export function createClaudeAnalyzer(
   return {
     provider: "claude",
     model,
-    async analyze(files, securityContext): Promise<Finding[]> {
+    async analyze(files, securityContext): Promise<AnalysisResult> {
       const response = await client.messages.create({
         model,
         max_tokens: MAX_TOKENS,
@@ -79,7 +79,13 @@ export function createClaudeAnalyzer(
           { role: "user", content: buildUserMessage(files, securityContext) },
         ],
       });
-      return extractFindings(response);
+      return {
+        findings: extractFindings(response),
+        usage: {
+          inputTokens: response.usage.input_tokens,
+          outputTokens: response.usage.output_tokens,
+        },
+      };
     },
   };
 }

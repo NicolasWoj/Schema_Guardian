@@ -1,4 +1,5 @@
 import type { Finding, Severity } from "../types";
+import type { TokenUsage } from "../analyzer/provider";
 import { BOT_MARKER } from "../github/review";
 
 /** Ordre d'affichage (le plus grave d'abord) et libellés lisibles par sévérité. */
@@ -16,44 +17,68 @@ const SEVERITY_LABEL: Record<Severity, string> = {
   info: "🔵 Info",
 };
 
+/** Options du pied de page de la synthèse (Sprint 5). */
+export interface SummaryOptions {
+  /** Fichiers non analysés faute de budget de diff. */
+  truncated?: string[];
+  /** Tokens consommés (journalisation des coûts). */
+  usage?: TokenUsage;
+  /** Seuil de blocage configuré (`none`, `high`, …). */
+  failOn?: string;
+  /** La PR est-elle bloquée par ce check ? */
+  blocked?: boolean;
+}
+
 /**
- * Transforme les findings en commentaire Markdown de synthèse, trié par sévérité.
- * Si aucun finding : message rassurant explicite (le silence inquiète plus qu'il ne rassure
- * une fois que des fichiers pertinents ont été analysés).
+ * Commentaire de synthèse — **source de vérité** (upserté). Liste tous les findings triés par
+ * sévérité, plus un pied de page : troncature signalée, blocage éventuel, coût en tokens.
  */
-export function formatSummary(findings: Finding[]): string {
+export function formatSummary(findings: Finding[], opts: SummaryOptions = {}): string {
   const lines: string[] = [BOT_MARKER, "### 🛡️ Schema Guardian", ""];
 
   if (findings.length === 0) {
-    lines.push(
-      "✅ Aucune fuite de clé `service_role` détectée dans les fichiers analysés.",
+    lines.push("✅ Aucun problème de sécurité détecté dans les fichiers analysés.");
+  } else {
+    const sorted = [...findings].sort(
+      (a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity],
     );
-    return lines.join("\n");
+    const n = findings.length;
+    const plural = n > 1 ? "s" : "";
+    lines.push(`⚠️ **${n} problème${plural} de sécurité détecté${plural}.**`, "");
+    for (const f of sorted) {
+      lines.push(`#### ${SEVERITY_LABEL[f.severity]} — ${f.title}`);
+      lines.push(`- **Fichier :** \`${f.file}\` (ligne ${f.line})`);
+      lines.push(`- **Catégorie :** \`${f.category}\``);
+      lines.push(`- **Risque :** ${f.explanation}`);
+      lines.push(`- **Correctif :** ${f.suggested_fix}`);
+      lines.push("");
+    }
   }
 
-  const sorted = [...findings].sort(
-    (a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity],
-  );
-
-  const n = findings.length;
-  const plural = n > 1 ? "s" : "";
-  lines.push(`⚠️ **${n} problème${plural} de sécurité détecté${plural}.**`, "");
-
-  for (const f of sorted) {
-    lines.push(`#### ${SEVERITY_LABEL[f.severity]} — ${f.title}`);
-    lines.push(`- **Fichier :** \`${f.file}\` (ligne ${f.line})`);
-    lines.push(`- **Catégorie :** \`${f.category}\``);
-    lines.push(`- **Risque :** ${f.explanation}`);
-    lines.push(`- **Correctif :** ${f.suggested_fix}`);
-    lines.push("");
+  const footer: string[] = [];
+  if (opts.truncated && opts.truncated.length > 0) {
+    footer.push(
+      `⚠️ Diff volumineux : ${opts.truncated.length} fichier(s) non analysé(s) (tronqués) — ` +
+        opts.truncated.map((f) => `\`${f}\``).join(", ") +
+        ".",
+    );
+  }
+  if (opts.blocked) {
+    footer.push(`⛔ Ce check **bloque** la PR (seuil \`failOn="${opts.failOn}"\` atteint).`);
+  }
+  if (opts.usage) {
+    footer.push(`_Coût : ${opts.usage.inputTokens} tokens in / ${opts.usage.outputTokens} out._`);
+  }
+  if (footer.length > 0) {
+    lines.push("---", ...footer);
   }
 
   return lines.join("\n").trimEnd();
 }
 
 /**
- * Corps d'un commentaire **ancré sur la ligne** du finding (Sprint 2).
- * Pas de chemin/ligne dans le texte : ils sont portés par l'ancrage GitHub lui-même.
+ * Corps d'un commentaire **ancré sur la ligne** du finding.
+ * Le chemin/ligne sont portés par l'ancrage GitHub lui-même.
  */
 export function formatInlineComment(f: Finding): string {
   return [
@@ -64,37 +89,4 @@ export function formatInlineComment(f: Finding): string {
     `**Risque :** ${f.explanation}`,
     `**Correctif :** ${f.suggested_fix}`,
   ].join("\n");
-}
-
-/**
- * Corps de la revue (le commentaire de tête de `createReview`) quand au moins un finding
- * est ancré : annonce le total et reverse en synthèse les findings **non ancrables**
- * (ligne hors diff) — c'est le repli qui évite la 422.
- */
-export function formatReviewSummary(
-  unanchored: Finding[],
-  total: number,
-): string {
-  const plural = total > 1 ? "s" : "";
-  const lines: string[] = [
-    BOT_MARKER,
-    "### 🛡️ Schema Guardian",
-    "",
-    `⚠️ **${total} problème${plural} de sécurité détecté${plural}.** Détails sur les lignes concernées ci-dessous.`,
-  ];
-
-  if (unanchored.length > 0) {
-    const sorted = [...unanchored].sort(
-      (a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity],
-    );
-    lines.push(
-      "",
-      `**${unanchored.length} finding(s) non rattachable(s) à une ligne du diff :**`,
-    );
-    for (const f of sorted) {
-      lines.push(`- ${SEVERITY_LABEL[f.severity]} \`${f.file}\` (ligne ${f.line}) — ${f.title}`);
-    }
-  }
-
-  return lines.join("\n").trimEnd();
 }

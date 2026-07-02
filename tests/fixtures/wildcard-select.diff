@@ -1,0 +1,19 @@
+diff --git a/app/docs/AllDocs.tsx b/app/docs/AllDocs.tsx
+new file mode 100644
+index 0000000..cc33dd4
+--- /dev/null
++++ b/app/docs/AllDocs.tsx
+@@ -0,0 +1,13 @@
++"use client";
++
++import { createClient } from "@supabase/supabase-js";
++
++const supabase = createClient(
++  process.env.NEXT_PUBLIC_SUPABASE_URL!,
++  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
++);
++
++export async function AllDocs() {
++  const { data } = await supabase.from("documents").select("*");
++  return data ?? [];
++}

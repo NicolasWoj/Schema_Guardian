@@ -1,12 +1,13 @@
 {
   "name": "schema-guardian",
-  "version": "0.6.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "description": "Agent de sécurité pour la frontière Next.js <-> Supabase (GitHub Action).",
   "scripts": {
     "typecheck": "tsc --noEmit && echo Typecheck OK",
     "test:local": "tsx tests/local.ts",
+    "eval": "tsx tests/eval.ts",
     "start": "tsx src/index.ts"
   },
   "engines": {

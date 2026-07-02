@@ -7,11 +7,22 @@ import { createGeminiAnalyzer } from "./providers/gemini";
  * Abstraction multi-fournisseur. Tout le pipeline ne dépend que de cette interface ;
  * brancher un nouveau LLM = ajouter une implémentation, sans toucher au reste.
  */
+/** Tokens consommés par un appel d'analyse (journalisation des coûts, Sprint 5). */
+export interface TokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+}
+
+export interface AnalysisResult {
+  findings: Finding[];
+  usage: TokenUsage;
+}
+
 export interface Analyzer {
   readonly provider: string;
   readonly model: string;
-  /** `securityContext` : carte RLS sérialisée (Sprint 3), injectée après le diff. */
-  analyze(files: ChangedFile[], securityContext?: string): Promise<Finding[]>;
+  /** `securityContext` : carte RLS + colonnes sensibles sérialisées, injectées après le diff. */
+  analyze(files: ChangedFile[], securityContext?: string): Promise<AnalysisResult>;
 }
 
 /**

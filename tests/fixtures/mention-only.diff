@@ -1,0 +1,14 @@
+diff --git a/app/ui/SecurityBanner.tsx b/app/ui/SecurityBanner.tsx
+new file mode 100644
+index 0000000..dd44ee5
+--- /dev/null
++++ b/app/ui/SecurityBanner.tsx
+@@ -0,0 +1,8 @@
++"use client";
++
++// Rappel d'architecture : ne JAMAIS importer SUPABASE_SERVICE_ROLE_KEY dans un
++// composant client. La configuration Supabase vit dans lib/server/. Ce composant
++// est purement présentateur et n'accède à aucune table.
++export function SecurityBanner() {
++  return null;
++}

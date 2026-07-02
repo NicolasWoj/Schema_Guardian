@@ -2,7 +2,7 @@ import { GoogleGenAI, Type } from "@google/genai";
 import type { Schema } from "@google/genai";
 import { SYSTEM_PROMPT, buildUserMessage } from "../prompt";
 import { CATEGORIES, SEVERITIES, FINDING_REQUIRED, validateFindings } from "../schema";
-import type { Analyzer } from "../provider";
+import type { Analyzer, AnalysisResult } from "../provider";
 import type { Finding } from "../../types";
 
 /**
@@ -53,7 +53,7 @@ export function createGeminiAnalyzer(
   return {
     provider: "gemini",
     model,
-    async analyze(files, securityContext): Promise<Finding[]> {
+    async analyze(files, securityContext): Promise<AnalysisResult> {
       const response = await ai.models.generateContent({
         model,
         contents: buildUserMessage(files, securityContext),
@@ -64,8 +64,13 @@ export function createGeminiAnalyzer(
         },
       });
 
+      const usage = {
+        inputTokens: response.usageMetadata?.promptTokenCount ?? 0,
+        outputTokens: response.usageMetadata?.candidatesTokenCount ?? 0,
+      };
+
       const text = response.text;
-      if (!text) return [];
+      if (!text) return { findings: [], usage };
 
       let parsed: unknown;
       try {
@@ -73,7 +78,7 @@ export function createGeminiAnalyzer(
       } catch {
         throw new Error("Réponse Gemini illisible : JSON invalide.");
       }
-      return validateFindings(parsed);
+      return { findings: validateFindings(parsed), usage };
     },
   };
 }

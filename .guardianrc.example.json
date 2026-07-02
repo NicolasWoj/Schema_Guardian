@@ -1,0 +1,7 @@
+{
+  "//": "Copiez ce fichier en .guardianrc.json à la racine du dépôt pour configurer Schema Guardian.",
+  "ignore": ["docs/**", "**/*.test.ts", "**/__mocks__/**"],
+  "allowlist": ["src/lib/server-only/**"],
+  "failOn": "none",
+  "maxDiffChars": 60000
+}
