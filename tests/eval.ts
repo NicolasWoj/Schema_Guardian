@@ -1,5 +1,6 @@
 import { createAnalyzer } from "../src/analyzer/provider";
 import { loadCase, localConfig } from "./_fixture";
+import { severityRank } from "../src/types";
 import type { FindingCategory, Severity } from "../src/types";
 
 /**
@@ -18,8 +19,6 @@ interface EvalCase {
   allow: FindingCategory[];
   maxSeverity: Severity;
 }
-
-const RANK: Record<Severity, number> = { info: 1, medium: 2, high: 3, critical: 4 };
 
 const CASES: EvalCase[] = [
   { file: "vulnerable.diff", kind: "positive", mustFind: ["SERVICE_ROLE_LEAK"], allow: ["SERVICE_ROLE_LEAK", "SENSITIVE_OVERFETCH"], maxSeverity: "critical" },
@@ -66,7 +65,7 @@ async function run(): Promise<void> {
     totalFindings += findings.length;
 
     const fps = findings.filter(
-      (f) => !c.allow.includes(f.category) || RANK[f.severity] > RANK[c.maxSeverity],
+      (f) => !c.allow.includes(f.category) || severityRank(f.severity) > severityRank(c.maxSeverity),
     );
     falsePositives += fps.length;
 

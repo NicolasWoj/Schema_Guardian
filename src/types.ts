@@ -17,6 +17,15 @@ export const SEVERITIES = ["critical", "high", "medium", "info"] as const;
 export type FindingCategory = (typeof CATEGORIES)[number];
 export type Severity = (typeof SEVERITIES)[number];
 
+/**
+ * Rang de gravité **dérivé** de l'ordre de `SEVERITIES` (source unique) : plus le nombre est
+ * élevé, plus c'est grave (`critical` = max, `info` = min). À utiliser partout où l'on doit
+ * comparer/trier des sévérités — évite de redéclarer des tables de rang divergentes.
+ */
+export function severityRank(severity: Severity): number {
+  return SEVERITIES.length - SEVERITIES.indexOf(severity);
+}
+
 /** Une faille confirmée, telle que l'analyzer la rapportera (Sprint 1+). */
 export interface Finding {
   category: FindingCategory;

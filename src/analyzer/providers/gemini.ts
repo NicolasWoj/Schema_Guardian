@@ -64,9 +64,13 @@ export function createGeminiAnalyzer(
         },
       });
 
+      // `outputTokens` doit refléter TOUT le sortant facturé, comme `output_tokens` chez Claude :
+      // sur un modèle « thinking », les jetons de raisonnement (`thoughtsTokenCount`) s'ajoutent
+      // aux `candidatesTokenCount` — sinon le coût Gemini est massivement sous-compté.
+      const meta = response.usageMetadata;
       const usage = {
-        inputTokens: response.usageMetadata?.promptTokenCount ?? 0,
-        outputTokens: response.usageMetadata?.candidatesTokenCount ?? 0,
+        inputTokens: meta?.promptTokenCount ?? 0,
+        outputTokens: (meta?.candidatesTokenCount ?? 0) + (meta?.thoughtsTokenCount ?? 0),
       };
 
       const text = response.text;

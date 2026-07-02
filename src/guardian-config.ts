@@ -2,13 +2,14 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import * as core from "@actions/core";
 import type { Finding, Severity } from "./types";
-import { SEVERITIES } from "./types";
+import { SEVERITIES, severityRank } from "./types";
 
 /**
  * Configuration par dépôt via `.guardianrc.json` (à la racine).
  *
- * - `ignore` / `allowlist` : globs de fichiers à NE PAS analyser (chemins non pertinents /
- *   fichiers serveur de confiance). Matcher de globs maison — aucune dépendance ajoutée.
+ * - `ignore` : globs de fichiers à NE PAS analyser (chemins non pertinents). Matcher de globs
+ *   maison — aucune dépendance ajoutée. (`allowlist` est un alias **déprécié** de `ignore`,
+ *   fusionné à la lecture : il faisait exactement la même chose.)
  * - `failOn` : seuil de blocage opt-in. `none` (défaut) = fail open (l'agent commente, ne bloque pas).
  * - `maxDiffChars` : plafond de diff envoyé au LLM (au-delà : troncature signalée).
  */
@@ -16,23 +17,14 @@ export type FailOn = "none" | Severity;
 
 export interface GuardianConfig {
   ignore: string[];
-  allowlist: string[];
   failOn: FailOn;
   maxDiffChars: number;
 }
 
 const DEFAULT_CONFIG: GuardianConfig = {
   ignore: [],
-  allowlist: [],
   failOn: "none",
   maxDiffChars: 60000,
-};
-
-const SEVERITY_RANK: Record<Severity, number> = {
-  info: 1,
-  medium: 2,
-  high: 3,
-  critical: 4,
 };
 
 /**
@@ -64,9 +56,16 @@ export function parseGuardianConfig(content: string | null): GuardianConfig {
   }
 
   const obj = raw as Record<string, unknown>;
+  const ignore = asStringArray(obj.ignore, DEFAULT_CONFIG.ignore);
+  // `allowlist` (déprécié) faisait exactement la même chose qu'`ignore` : on le fusionne pour
+  // ne pas casser les configs existantes, avec un avertissement invitant à migrer vers `ignore`.
+  const allowlist = asStringArray(obj.allowlist, []);
+  if (allowlist.length > 0) {
+    core.warning(".guardianrc: `allowlist` est déprécié (alias d'`ignore`) — fusionné dans `ignore`.");
+  }
+
   return {
-    ignore: asStringArray(obj.ignore, DEFAULT_CONFIG.ignore),
-    allowlist: asStringArray(obj.allowlist, DEFAULT_CONFIG.allowlist),
+    ignore: [...ignore, ...allowlist],
     failOn: asFailOn(obj.failOn),
     maxDiffChars:
       typeof obj.maxDiffChars === "number" && obj.maxDiffChars > 0
@@ -144,14 +143,14 @@ export function matchesAny(path: string, globs: string[]): boolean {
   return globs.some((g) => globToRegExp(g).test(path));
 }
 
-/** Un fichier doit-il être exclu de l'analyse (ignore OU allowlist) ? */
+/** Un fichier doit-il être exclu de l'analyse ? */
 export function isExcluded(path: string, config: GuardianConfig): boolean {
-  return matchesAny(path, config.ignore) || matchesAny(path, config.allowlist);
+  return matchesAny(path, config.ignore);
 }
 
 /** Un finding atteint-il le seuil de blocage configuré ? (`none` ne bloque jamais.) */
 export function shouldBlock(findings: Finding[], failOn: FailOn): boolean {
   if (failOn === "none") return false;
-  const threshold = SEVERITY_RANK[failOn];
-  return findings.some((f) => SEVERITY_RANK[f.severity] >= threshold);
+  const threshold = severityRank(failOn);
+  return findings.some((f) => severityRank(f.severity) >= threshold);
 }

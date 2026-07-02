@@ -198,14 +198,16 @@ function offlineHardeningTests(): void {
   assert(cfg.ignore.includes("docs/**") && cfg.failOn === "high", "config .guardianrc chargée");
   assert(isExcluded("docs/readme.md", cfg) && !isExcluded("src/index.ts", cfg), "ignore matché");
   assert(loadGuardianConfig(SAMPLE_REPO).failOn === "none", "défaut failOn=none (pas de .guardianrc)");
-  console.log("  ✓ config : ignore/allowlist + défaut failOn=none");
+  console.log("  ✓ config : ignore + défaut failOn=none");
 
   // parseGuardianConfig (pur) : absent -> défauts ; valide -> fusion ; JSON invalide -> défauts.
   // (En prod, le contenu vient de la branche base — cf. getBaseFileContent — pas du checkout PR.)
   assert(parseGuardianConfig(null).failOn === "none", "config absente -> défauts");
   assert(parseGuardianConfig('{"failOn":"high","ignore":["x/**"]}').failOn === "high", "config valide fusionnée");
   assert(parseGuardianConfig('{"failOn":"critical",}').failOn === "none", "JSON invalide -> défauts (pas de crash)");
-  console.log("  ✓ config : parse pur (absent/valide/malformé)");
+  // `allowlist` déprécié : fusionné dans `ignore` (même comportement, un seul knob).
+  assert(parseGuardianConfig('{"allowlist":["legacy/**"]}').ignore.includes("legacy/**"), "allowlist fusionné dans ignore");
+  console.log("  ✓ config : parse pur (absent/valide/malformé/allowlist déprécié)");
 
   // globstar : `**` + slash matche zéro OU plusieurs segments (fichier racine inclus).
   assert(matchesAny("app.test.ts", ["**/*.test.ts"]), "globstar matche un fichier racine");

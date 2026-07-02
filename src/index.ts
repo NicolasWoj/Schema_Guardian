@@ -136,8 +136,7 @@ async function main(): Promise<void> {
   const summary = formatSummary(findings, {
     truncated: truncated.map((f) => f.filename),
     usage,
-    failOn: guardian.failOn,
-    blocked,
+    blockedAt: blocked ? guardian.failOn : undefined,
   });
   await upsertSummaryComment(octokit, ref, summary);
   core.info(`Synthèse mise à jour ✅ (${posted} commentaire(s) ancré(s)).`);

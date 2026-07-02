@@ -38,7 +38,7 @@ GitHub Action ──► COLLECTOR ──► ANALYZER (Claude) ──► REPORTER
 | `src/context/` | Filtre de pertinence + scan RLS du dépôt (`rls.ts`) + collecte des accès `from()` (`collector.ts`). |
 | `src/analyzer/` | Interface multi-fournisseur (`Analyzer`) + implémentations `providers/{claude,gemini}.ts` + contrat Zod partagé. |
 | `src/report/`   | Mise en forme Markdown des findings (synthèse + commentaires ancrés). |
-| `src/guardian-config.ts` | Config `.guardianrc` (ignore/allowlist, `failOn`, `maxDiffChars`). |
+| `src/guardian-config.ts` | Config `.guardianrc` (`ignore`, `failOn`, `maxDiffChars`). |
 | `tests/`        | Harnais local + **jeu d'éval** (`eval.ts`) + fixtures. |
 
 ## Prérequis
@@ -100,8 +100,7 @@ Optionnel, à la racine du dépôt audité (voir [`.guardianrc.example.json`](.g
 
 ```json
 {
-  "ignore": ["docs/**", "**/*.test.ts"],
-  "allowlist": ["src/lib/server-only/**"],
+  "ignore": ["docs/**", "**/*.test.ts", "src/lib/server-only/**"],
   "failOn": "none",
   "maxDiffChars": 60000
 }
@@ -110,9 +109,10 @@ Optionnel, à la racine du dépôt audité (voir [`.guardianrc.example.json`](.g
 | Clé | Rôle | Défaut |
 |---|---|---|
 | `ignore` | Globs de fichiers jamais analysés. | `[]` |
-| `allowlist` | Globs de fichiers de confiance (non analysés). | `[]` |
 | `failOn` | Seuil de **blocage** de la PR : `none` \| `info` \| `medium` \| `high` \| `critical`. | `none` |
 | `maxDiffChars` | Plafond de diff envoyé au LLM (au-delà : troncature signalée). | `60000` |
+
+> `allowlist` est un alias **déprécié** d'`ignore` (comportement identique) : encore lu et fusionné dans `ignore`, mais à migrer.
 
 > **`failOn: "none"` par défaut = fail open** : l'agent commente, il ne bloque pas — sauf activation explicite.
 > Le commentaire de synthèse est **idempotent** (mis à jour en place) ; les commentaires ancrés obsolètes sont supprimés puis recréés à chaque push.

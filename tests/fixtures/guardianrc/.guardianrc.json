@@ -1,6 +1,5 @@
 {
-  "ignore": ["docs/**", "*.md"],
-  "allowlist": ["src/trusted/**"],
+  "ignore": ["docs/**", "*.md", "src/trusted/**"],
   "failOn": "high",
   "maxDiffChars": 40000
 }

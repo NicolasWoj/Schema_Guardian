@@ -1,15 +1,10 @@
 import type { Finding, Severity } from "../types";
+import { severityRank } from "../types";
 import type { TokenUsage } from "../analyzer/provider";
+import type { FailOn } from "../guardian-config";
 import { BOT_MARKER } from "../github/review";
 
-/** Ordre d'affichage (le plus grave d'abord) et libellés lisibles par sévérité. */
-const SEVERITY_ORDER: Record<Severity, number> = {
-  critical: 0,
-  high: 1,
-  medium: 2,
-  info: 3,
-};
-
+/** Libellés lisibles par sévérité. */
 const SEVERITY_LABEL: Record<Severity, string> = {
   critical: "🔴 Critique",
   high: "🟠 Élevé",
@@ -23,10 +18,11 @@ export interface SummaryOptions {
   truncated?: string[];
   /** Tokens consommés (journalisation des coûts). */
   usage?: TokenUsage;
-  /** Seuil de blocage configuré (`none`, `high`, …). */
-  failOn?: string;
-  /** La PR est-elle bloquée par ce check ? */
-  blocked?: boolean;
+  /**
+   * Seuil qui a **bloqué** la PR, ou `undefined` si le check ne bloque pas. Un seul champ (au
+   * lieu d'un booléen + un seuil) : impossible d'afficher un `failOn="undefined"` incohérent.
+   */
+  blockedAt?: FailOn;
 }
 
 /**
@@ -40,7 +36,7 @@ export function formatSummary(findings: Finding[], opts: SummaryOptions = {}): s
     lines.push("✅ Aucun problème de sécurité détecté dans les fichiers analysés.");
   } else {
     const sorted = [...findings].sort(
-      (a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity],
+      (a, b) => severityRank(b.severity) - severityRank(a.severity),
     );
     const n = findings.length;
     const plural = n > 1 ? "s" : "";
@@ -63,8 +59,8 @@ export function formatSummary(findings: Finding[], opts: SummaryOptions = {}): s
         ".",
     );
   }
-  if (opts.blocked) {
-    footer.push(`⛔ Ce check **bloque** la PR (seuil \`failOn="${opts.failOn}"\` atteint).`);
+  if (opts.blockedAt) {
+    footer.push(`⛔ Ce check **bloque** la PR (seuil \`failOn="${opts.blockedAt}"\` atteint).`);
   }
   if (opts.usage) {
     footer.push(`_Coût : ${opts.usage.inputTokens} tokens in / ${opts.usage.outputTokens} out._`);
